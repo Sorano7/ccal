@@ -469,7 +469,7 @@ Expr *parse_group(Parser *p)
     ENSURE_OK(e);
 
     if (!parser_expect(p, TOK_RPAREN))
-        return parser_error(p, "Expected '('");
+        return parser_error(p, "Expected ')'");
 
     parser_advance(p);
     return e;

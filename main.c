@@ -85,7 +85,6 @@ bool lexer_init(Lexer *l)
 void lexer_reset(Lexer *l)
 {
     l->src = NULL;
-    l->cap = 128;
     l->len = 0;
 }
 
@@ -658,6 +657,9 @@ void repl_start(void)
 
     for (;;)
     {
+        lexer_reset(&l);
+        parser_reset(&p);
+
         printf("> ");
         char buffer[1024];
         if (!fgets(buffer, sizeof(buffer), stdin))
@@ -688,9 +690,6 @@ void repl_start(void)
             gmp_printf("%Qd\n", value);
         else
             printf("Error: %s\n", res.msg);
-
-        lexer_reset(&l);
-        parser_reset(&p);
     }
 
     mpq_clear(value);

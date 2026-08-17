@@ -641,6 +641,14 @@ EvalResult evaluate(Expr *e, mpq_t out)
     return eval_ok();
 }
 
+// Output mode of the REPL.
+typedef enum
+{
+    REPL_EVAL,
+    REPL_AST,
+    REPL_TOKEN,
+} ReplMode;
+
 // Start REPL.
 void repl_start(void)
 {
@@ -654,6 +662,8 @@ void repl_start(void)
 
     mpq_t value;
     mpq_init(value);
+
+    ReplMode mode = REPL_EVAL;
 
     for (;;)
     {
@@ -669,12 +679,29 @@ void repl_start(void)
 
         if (strlen(buffer) == 0) break;
 
-        if (strcmp(buffer, ":q") == 0)
-            break;
+        if (buffer[0] == ':')
+        {
+            if (strcmp(buffer, ":q") == 0)
+                break;
+
+            if (strcmp(buffer, ":eval") == 0)
+                mode = REPL_EVAL;
+
+            else if (strcmp(buffer, ":ast") == 0)
+                mode = REPL_AST;
+
+            else if (strcmp(buffer, ":token") == 0)
+                mode = REPL_TOKEN;
+
+            else
+                printf("Unknown command.\n");
+
+            continue;
+        }
 
         if (!tokenize(&l, buffer))
         {
-            printf("Invalid expression\n");
+            printf("Invalid expression.\n");
             continue;
         }
 
@@ -685,11 +712,23 @@ void repl_start(void)
             continue;
         }
 
-        EvalResult res = evaluate(e, value);
-        if (res.ok)
-            gmp_printf("%Qd\n", value);
-        else
-            printf("Error: %s\n", res.msg);
+        switch (mode)
+        {
+            case REPL_EVAL:
+                EvalResult res = evaluate(e, value);
+                if (res.ok)
+                    gmp_printf("%Qd\n", value);
+                else
+                    printf("Error: %s.\n", res.msg);
+                break;
+
+            case REPL_AST:
+                ast_print(e, 0);
+                break;
+
+            case REPL_TOKEN:
+                lexer_print(&l);
+        }
     }
 
     mpq_clear(value);

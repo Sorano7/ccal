@@ -22,13 +22,16 @@
     X(TOK_RPAREN) \
     X(TOK_EOF)
 
+// Kinds of a token.
 typedef enum
 {
     TOKENS(AS_LIST)
 } TokenKind;
 
-static const char *token_kind_names[] = {TOKENS(AS_STR)};
+// Convert a token kind to string.
+static const char *token_kind_str[] = {TOKENS(AS_STR)};
 
+// Get the kind of token based on the first character.
 TokenKind token_kind_get(char c)
 {
     switch (c)
@@ -49,6 +52,7 @@ TokenKind token_kind_get(char c)
     return TOK_INVALID;
 }
 
+// A token.
 typedef struct
 {
     const char *data;
@@ -57,6 +61,7 @@ typedef struct
     TokenKind kind;
 } Token;
 
+// Lexer for tokenizing the source.
 typedef struct
 {
     const char *src;
@@ -65,6 +70,7 @@ typedef struct
     size_t cap;
 } Lexer;
 
+// Initialize a lexer.
 bool lexer_init(Lexer *l)
 {
     l->src = NULL;
@@ -75,6 +81,7 @@ bool lexer_init(Lexer *l)
     return true;
 }
 
+// Reset a lexer.
 void lexer_reset(Lexer *l)
 {
     l->src = NULL;
@@ -82,6 +89,7 @@ void lexer_reset(Lexer *l)
     l->len = 0;
 }
 
+// Push a new token to the lexer.
 bool lexer_push(Lexer *l, Token tok)
 {
     if (l->len + 1 > l->cap)
@@ -96,18 +104,21 @@ bool lexer_push(Lexer *l, Token tok)
     return true;
 }
 
+// Print the tokens in the lexer.
 void lexer_print(Lexer *l)
 {
     for (size_t i = 0; i < l->len; i++)
     {
         Token tok = l->tokens[i];
-        printf("%02zu: %s(", i, token_kind_names[tok.kind]);
+        printf("%02zu: %s(", i, token_kind_str[tok.kind]);
         if (tok.len > 0)
             printf("%.*s", (int)tok.len, tok.data);
         printf(")\n");
     }
 }
 
+// Tokenize the source. src will be referenced in the lexer.
+// Return false if an invalid token is encountered.
 bool tokenize(Lexer *l, const char *src)
 {
     l->src = src;
@@ -147,15 +158,18 @@ bool tokenize(Lexer *l, const char *src)
     X(OP_DIV, "/") \
     X(OP_NEG, "-")
 
+// Infix and prefix operators.
 typedef enum
 {
     OPERATORS(AS_LIST)
 } Operator;
 
+// Corresponding symbols of the operator.
 static char *op_symbols[] = {
     OPERATORS(WITH_STR)
 };
 
+// Cast the token as an infix operator.
 Operator token_as_infix_op(Token t)
 {
     switch (t.kind)
@@ -168,6 +182,7 @@ Operator token_as_infix_op(Token t)
     }
 }
 
+// Cast the token as a prefix operator.
 Operator token_as_prefix_op(Token t)
 {
     switch (t.kind)
@@ -177,6 +192,7 @@ Operator token_as_prefix_op(Token t)
     }
 }
 
+// Operator precedence levels.
 typedef enum
 {
     PREC_PRIMARY,
@@ -185,6 +201,7 @@ typedef enum
     PREC_PREFIX,
 } OpPrec;
 
+// Get the precedence of the token.
 OpPrec token_get_prec(Token t)
 {
     switch (t.kind)
@@ -202,6 +219,7 @@ OpPrec token_get_prec(Token t)
     }
 }
 
+// Kinds of an expression.
 typedef enum
 {
     EXPR_ERROR,
@@ -210,6 +228,7 @@ typedef enum
     EXPR_PREFIX,
 } ExprKind;
 
+// An expression.
 typedef struct Expr
 {
     union
@@ -240,9 +259,13 @@ typedef struct Expr
     } as;
     ExprKind kind;
 
+    // The start position of the span.
+    // TODO: use a shared span structure across tokens and expressions.
     size_t start;
 } Expr;
 
+// Allocate a new expression with kind.
+// Abort if out of memory.
 Expr *expr_new(ExprKind kind)
 {
     Expr *e = malloc(sizeof(Expr));
@@ -251,6 +274,7 @@ Expr *expr_new(ExprKind kind)
     return e;
 }
 
+// Clears and frees the content of an expression.
 void expr_free(Expr *e)
 {
     if (!e) return;
@@ -277,6 +301,7 @@ void expr_free(Expr *e)
     }
 }
 
+// Create an error expression with message.
 Expr *expr_error(const char *msg)
 {
     Expr *e = expr_new(EXPR_ERROR);
@@ -284,11 +309,13 @@ Expr *expr_error(const char *msg)
     return e;
 }
 
+// Check if an expression is error.
 bool is_error(Expr *e)
 {
     return e->kind == EXPR_ERROR;
 }
 
+// Create a number expression.
 Expr *expr_number(mpq_t value)
 {
     Expr *e = expr_new(EXPR_NUMBER);
@@ -298,6 +325,7 @@ Expr *expr_number(mpq_t value)
     return e;
 }
 
+// Create an infix expression.
 Expr *expr_infix(Expr *l, Operator op, Expr *r)
 {
     Expr *e = expr_new(EXPR_INFIX);
@@ -307,6 +335,7 @@ Expr *expr_infix(Expr *l, Operator op, Expr *r)
     return e;
 }
 
+// Create a prefix expression.
 Expr *expr_prefix(Operator op, Expr *expr)
 {
     Expr *e = expr_new(EXPR_PREFIX);
@@ -315,28 +344,33 @@ Expr *expr_prefix(Operator op, Expr *expr)
     return e;
 }
 
+// Parser for parsing tokens into AST.
 typedef struct
 {
-    Lexer *lex;
+    const Lexer *lex;
     size_t pos;
 } Parser;
 
-void parser_init(Parser *p, Lexer *l)
+// Intiialize a parser with a reference to the lexer.
+void parser_init(Parser *p, const Lexer *l)
 {
     p->lex = l;
     p->pos = 0;
 }
 
+// Reset the parser. Does not clear lexer reference.
 void parser_reset(Parser *p)
 {
     p->pos = 0;
 }
 
+// Get the current token of the parser.
 Token parser_get_token(const Parser *p)
 {
     return p->lex->tokens[p->pos];
 }
 
+// Advance the parser.
 void parser_advance(Parser *p)
 {
     if (p->pos >= p->lex->len)
@@ -347,22 +381,26 @@ void parser_advance(Parser *p)
     p->pos++;
 }
 
+// Checks if the parser is at EOF.
 bool parser_is_eof(Parser *p)
 {
     return parser_get_token(p).kind == TOK_EOF;
 }
 
+// Checks if the current token matches the token kind.
 bool parser_expect(const Parser *p, TokenKind tk)
 {
     Token t = parser_get_token(p);
     return t.kind == tk;
 }
 
+// Get the current precedence.
 int parser_get_prec(const Parser *p)
 {
     return token_get_prec(parser_get_token(p));
 }
 
+// Create an error expression with parser context.
 Expr *parser_error(Parser *p, const char *msg)
 {
     Expr *err = expr_error(msg);
@@ -370,6 +408,7 @@ Expr *parser_error(Parser *p, const char *msg)
     return err;
 }
 
+// Prints the error expression.
 void parser_diagnostics(Parser *p, Expr *err)
 {
     if (err->kind != EXPR_ERROR) return;
@@ -387,6 +426,7 @@ void parser_diagnostics(Parser *p, Expr *err)
 
 Expr *parse_expr(Parser *p, int prec);
 
+// Parse an infix expression.
 Expr *parse_infix_expr(Parser *p, Expr *left, int prec)
 {
     Operator op = token_as_infix_op(parser_get_token(p));
@@ -400,6 +440,7 @@ Expr *parse_infix_expr(Parser *p, Expr *left, int prec)
     return expr_infix(left, op, right);
 }
 
+// Parse a number literal.
 Expr *parse_number(Parser *p)
 {
     Token tok = parser_get_token(p);
@@ -421,6 +462,7 @@ Expr *parse_number(Parser *p)
     return e;
 }
 
+// Parse a group expression.
 Expr *parse_group(Parser *p)
 {
     parser_advance(p);
@@ -434,6 +476,7 @@ Expr *parse_group(Parser *p)
     return e;
 }
 
+// Parse a prefix expression.
 Expr *parse_prefix(Parser *p)
 {
     parser_advance(p);
@@ -444,6 +487,7 @@ Expr *parse_prefix(Parser *p)
     return e;
 }
 
+// Parse an expression.
 Expr *parse_expr(Parser *p, int prec)
 {
     Expr *e = NULL;
@@ -481,6 +525,7 @@ Expr *parse_expr(Parser *p, int prec)
     printf(fmt __VA_OPT__(,) __VA_ARGS__); \
 } while (0)
 
+// Print the AST of an expression.
 void ast_print(Expr *e, int indent)
 {
     if (!e)
@@ -524,6 +569,7 @@ void ast_print(Expr *e, int indent)
     printf_indent(indent, "},\n");
 }
 
+// Result of evaluation.
 typedef struct
 {
     bool ok;
@@ -533,6 +579,7 @@ typedef struct
 #define eval_error(msg) (EvalResult){false, msg}
 #define eval_ok() (EvalResult){true, NULL}
 
+// Evaluate an expression and sets the value to out.
 EvalResult evaluate(Expr *e, mpq_t out)
 {
     EvalResult res = {0};
@@ -595,6 +642,7 @@ EvalResult evaluate(Expr *e, mpq_t out)
     return eval_ok();
 }
 
+// Start REPL.
 void repl_start(void)
 {
     Lexer l;
@@ -612,8 +660,15 @@ void repl_start(void)
     {
         printf("> ");
         char buffer[1024];
-        fgets(buffer, sizeof(buffer), stdin);
+        if (!fgets(buffer, sizeof(buffer), stdin))
+            break;
+
         buffer[strcspn(buffer, "\n")] = '\0';
+
+        if (strlen(buffer) == 0) break;
+
+        if (strcmp(buffer, ":q") == 0)
+            break;
 
         if (!tokenize(&l, buffer))
         {
@@ -645,7 +700,15 @@ void repl_start(void)
 int main(int argc, char **argv)
 {
     if (argc == 2 && strcmp(argv[1], "repl") == 0)
+    {
         repl_start();
+    }
+    else
+    {
+        printf("Usage:\n");
+        printf("    ccal help     show this help\n");
+        printf("    ccal repl     start REPL\n");
+    }
 
     return 0;
 }

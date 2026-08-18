@@ -3,6 +3,55 @@
 #define eval_error(msg) (EvalResult){false, msg}
 #define eval_ok() (EvalResult){true, NULL}
 
+// Evaluate an infix operation.
+EvalResult evaluate_infix(Expr *e, mpq_t out)
+{
+    mpq_t l, r;
+    mpq_inits(l, r, NULL);
+
+    EvalResult res = evaluate(e->as.infix.left, l);
+    if (!res.ok)
+    {
+        mpq_clears(l, r, NULL);
+        return res;
+    }
+
+    res = evaluate(e->as.infix.right, r);
+    if (!res.ok)
+    {
+        mpq_clears(l, r, NULL);
+        return res;
+    }
+
+    switch (e->as.infix.op)
+    {
+        case OP_ADD:
+            mpq_add(out, l, r);
+            break;
+
+        case OP_SUB:
+            mpq_sub(out, l, r);
+            break;
+
+        case OP_MUL:
+            mpq_mul(out, l, r);
+            break;
+
+        case OP_DIV:
+             if (mpq_cmp_si(r, 0, 1) == 0)
+                 return eval_error("Division by zero");
+             mpq_div(out, l, r);
+             break;
+
+        default:
+             mpq_clears(l, r, NULL);
+             return eval_error("Unknown operator");
+    }
+    mpq_clears(l, r, NULL);
+
+    return eval_ok();
+}
+
 // Evaluate an expression and sets the value to out.
 EvalResult evaluate(Expr *e, mpq_t out)
 {
@@ -19,39 +68,8 @@ EvalResult evaluate(Expr *e, mpq_t out)
             break;
 
         case EXPR_INFIX:
-            mpq_t l, r;
-            mpq_inits(l, r, NULL);
-            res = evaluate(e->as.infix.left, l);
-            if (!res.ok)
-            {
-                mpq_clears(l, r, NULL);
-                return res;
-            }
-
-            res = evaluate(e->as.infix.right, r);
-            if (!res.ok)
-            {
-                mpq_clears(l, r, NULL);
-                return res;
-            }
-
-            switch (e->as.infix.op)
-            {
-                case OP_ADD: mpq_add(out, l, r); break;
-                case OP_SUB: mpq_sub(out, l, r); break;
-                case OP_MUL: mpq_mul(out, l, r); break;
-
-                case OP_DIV:
-                    if (mpq_cmp_si(r, 0, 1) == 0)
-                        return eval_error("Division by zero");
-                    mpq_div(out, l, r);
-                    break;
-
-                default:
-                     mpq_clears(l, r, NULL);
-                     return eval_error("Unknown operator");
-            }
-            mpq_clears(l, r, NULL);
+            res = evaluate_infix(e, out);
+            if (!res.ok) return res;
             break;
 
         case EXPR_PREFIX:

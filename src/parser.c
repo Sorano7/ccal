@@ -1,7 +1,11 @@
 #include "parser.h"
 #include "digit.h"
 
-#define DEFAULT_BASE 10
+#include <string.h>
+#include <stdlib.h>
+#include <errno.h>
+
+#define BASE_DEFAULT 10
 
 // Cast the token as an infix operator.
 static Operator token_as_infix_op(Token t)
@@ -95,6 +99,21 @@ static bool parser_expect_number(const Parser *p)
         || t.kind == TOK_ALNUM || t.kind == TOK_DIGIT;
 }
 
+static size_t parser_find_next(Parser *p, TokenKind tk)
+{
+    size_t prev_pos = p->pos;
+    while (!parser_expect(p, tk))
+    {
+        parser_advance(p);
+        if (parser_is_eof(p))
+            return SIZE_MAX;
+    }
+
+    size_t d = p->pos - prev_pos;
+    p->pos = prev_pos;
+    return d;
+}
+
 // Get the current precedence.
 static int parser_get_prec(const Parser *p)
 {
@@ -134,6 +153,22 @@ static Expr *parse_infix_expr(Parser *p, Expr *left, int prec)
         return parser_error((p), "Digit out of bounds"); \
 } while (0)
 
+static bool token_to_ul(Token tok, unsigned long *out)
+{
+    char buffer[tok.len+1];
+    memcpy(buffer, tok.data, tok.len);
+    buffer[tok.len] = '\0';
+
+    errno = 0;
+
+    char *end_ptr = NULL;
+    *out = strtoul(buffer, &end_ptr, 10);
+    if (errno == ERANGE)
+        return false;
+
+    return true;
+}
+
 // Try parsing a number part and return any error, NULL if no error is encountered.
 static Expr *try_parse_number_part(Parser *p, Digits *ds, DigitFormat fmt, unsigned long base)
 {
@@ -144,7 +179,7 @@ static Expr *try_parse_number_part(Parser *p, Digits *ds, DigitFormat fmt, unsig
         case TOK_ALNUM:
         case TOK_DIGIT:
             if (fmt != DIGIT_FMT_ALNUM)
-                return parser_error((p), "Expected alphanumerics");
+                return parser_error(p, "Expected digit list");
 
             DigitError err = digits_from_alnum(ds, tok.data, tok.len, base);
             ENSURE_DIGIT_OK(p, err);
@@ -153,9 +188,41 @@ static Expr *try_parse_number_part(Parser *p, Digits *ds, DigitFormat fmt, unsig
 
         case TOK_LBRAC:
             if (fmt != DIGIT_FMT_LIST)
-                return parser_error((p), "Expected digit list");
+                return parser_error(p, "Expected alphanumerics");
 
-            return parser_error(p, "Digit list not implemented");
+            parser_advance(p);
+            size_t i = 0;
+
+            size_t len = parser_find_next(p, TOK_RBRAC);
+            if (len == SIZE_MAX)
+                return parser_error(p, "Expected ']'");
+
+            digits_init(ds, len);
+            for (;;)
+            {
+                tok = parser_get_token(p);
+                if (tok.kind != TOK_DIGIT)
+                    return parser_error(p, "Expected numeric digit");
+
+                unsigned long val;
+                if (!token_to_ul(tok, &val) || val >= base)
+                    return parser_error(p, "Digit out of bounds");
+                parser_advance(p);
+
+                ds->data[i++] = val;
+                if (parser_expect(p, TOK_RBRAC))
+                {
+                    parser_advance(p);
+                    break;
+                }
+
+                if (!parser_expect(p, TOK_COMMA))
+                    return parser_error(p, "Expected ','"); 
+
+                parser_advance(p);
+            }
+            ds->len = i;
+            return NULL;
 
         default:
             return parser_error(p, "Expected number");
@@ -165,7 +232,7 @@ static Expr *try_parse_number_part(Parser *p, Digits *ds, DigitFormat fmt, unsig
 // Parse a number literal.
 static Expr *parse_number(Parser *p, DigitFormat fmt)
 {
-    unsigned long base = DEFAULT_BASE;
+    unsigned long base = BASE_DEFAULT;
 
     Literal lit = {0};
 

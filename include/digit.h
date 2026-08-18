@@ -31,8 +31,9 @@ typedef struct
 } Literal;
 
 void digits_init(Digits *ds, size_t len);
-DigitError digits_from_alnum(Digits *ds, const char *s, size_t len, unsigned long base);
 void digits_free(Digits *ds);
+
+DigitError digits_from_alnum(Digits *ds, const char *s, size_t len, unsigned long base);
 
 void literal_to_mpq(Literal *lit, unsigned long base, mpq_t out);
 

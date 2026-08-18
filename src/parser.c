@@ -1,5 +1,7 @@
 #include "parser.h"
-#include <string.h>
+#include "digit.h"
+
+#define DEFAULT_BASE 10
 
 // Cast the token as an infix operator.
 static Operator token_as_infix_op(Token t)
@@ -125,25 +127,94 @@ static Expr *parse_infix_expr(Parser *p, Expr *left, int prec)
     return expr_infix(left, op, right);
 }
 
-// Parse a number literal.
-static Expr *parse_number(Parser *p)
+#define ENSURE_DIGIT_OK(p, e) do { \
+    if ((e) == DIGIT_INVALID) \
+        return parser_error((p), "Invalid digit"); \
+    if ((e) == DIGIT_OUT_OF_BASE) \
+        return parser_error((p), "Digit out of bounds"); \
+} while (0)
+
+// Try parsing a number part and return any error, NULL if no error is encountered.
+static Expr *try_parse_number_part(Parser *p, Digits *ds, DigitFormat fmt, unsigned long base)
 {
     Token tok = parser_get_token(p);
 
-    mpq_t v;
-    mpq_init(v);
+    switch (tok.kind)
+    {
+        case TOK_ALNUM:
+        case TOK_DIGIT:
+            if (fmt != DIGIT_FMT_ALNUM)
+                return parser_error((p), "Expected alphanumerics");
 
-    char buffer[tok.len+1];
-    memcpy(buffer, tok.data, tok.len);
-    buffer[tok.len] = '\0';
+            DigitError err = digits_from_alnum(ds, tok.data, tok.len, base);
+            ENSURE_DIGIT_OK(p, err);
+            parser_advance(p);
+            return NULL;
 
-    if (mpq_set_str(v, buffer, 10) != 0)
-        return parser_error(p, "Invalid number literal");
+        case TOK_LBRAC:
+            if (fmt != DIGIT_FMT_LIST)
+                return parser_error((p), "Expected digit list");
 
-    Expr *e = expr_number(v);
-    mpq_clear(v);
+            return parser_error(p, "Digit list not implemented");
+
+        default:
+            return parser_error(p, "Expected number");
+    }
+}
+
+// Parse a number literal.
+static Expr *parse_number(Parser *p, DigitFormat fmt)
+{
+    unsigned long base = DEFAULT_BASE;
+
+    Literal lit = {0};
+
+    Digits ds_i = {0};
+    Digits ds_n = {0};
+    Digits ds_r = {0};
+
+    Expr *err = NULL;
+
+    if ((err = try_parse_number_part(p, &ds_i, fmt, base)))
+        return err;
+
+    lit.I = &ds_i;
+
+    mpq_t value;
+    mpq_init(value);
+
+    if (!parser_expect(p, TOK_DOT)) goto cleanup;
 
     parser_advance(p);
+
+    if (!parser_expect(p, TOK_LPAREN))
+    {
+        if ((err = try_parse_number_part(p, &ds_n, fmt, base)))
+                return err;
+
+        lit.N = &ds_n;
+    }
+
+    if (parser_expect(p, TOK_LPAREN))
+    {
+        parser_advance(p);
+        if ((err = try_parse_number_part(p, &ds_r, fmt, base)))
+            return err;
+
+        if (!parser_expect(p, TOK_RPAREN))
+            return parser_error(p, "Expected ')'");
+
+        lit.R = &ds_r;
+    }
+
+cleanup:
+    literal_to_mpq(&lit, base, value);
+    Expr *e = expr_number(value);
+
+    digits_free(&ds_i);
+    digits_free(&ds_n);
+    digits_free(&ds_r);
+    mpq_clear(value);
     return e;
 }
 
@@ -189,17 +260,28 @@ Expr *parse_expr(Parser *p, int prec)
 
     switch (tok.kind)
     {
-        case TOK_EOF:    return parser_error(p, "Unexpected EOF");
+        case TOK_EOF:
+            return parser_error(p, "Unexpected EOF");
 
         case TOK_DIGIT:
-        case TOK_ALNUM:  e = parse_number(p); break;
+        case TOK_ALNUM:
+             e = parse_number(p, DIGIT_FMT_ALNUM);
+             break;
 
-        case TOK_LPAREN: e = parse_group(p);  break;
+        case TOK_LBRAC:
+             e = parse_number(p, DIGIT_FMT_LIST);
+             break;
 
-        case TOK_MINUS:  e = parse_prefix(p); break;
+        case TOK_LPAREN:
+             e = parse_group(p);
+             break;
 
-        case TOK_LBRAC:  return parser_error(p, "Digit list not implemented");
-        default:         return parser_error(p, "Expected expression");
+        case TOK_MINUS:
+             e = parse_prefix(p);
+             break;
+
+        default:
+             return parser_error(p, "Expected expression");
     }
 
     int current_prec = parser_get_prec(p);

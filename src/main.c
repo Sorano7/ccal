@@ -17,11 +17,10 @@ typedef enum
 // Start REPL.
 void repl_start(void)
 {
-    Lexer l;
-    lexer_init(&l);
+    TokenArray ta = {0};
 
     Parser p;
-    parser_init(&p, &l);
+    parser_init(&p, &ta);
 
     Expr *e = NULL;
 
@@ -32,30 +31,29 @@ void repl_start(void)
 
     for (;;)
     {
-        lexer_reset(&l);
         parser_reset(&p);
 
         printf("> ");
-        char buffer[1024];
-        if (!fgets(buffer, sizeof(buffer), stdin))
+        char src[1024];
+        if (!fgets(src, sizeof(src), stdin))
             break;
 
-        buffer[strcspn(buffer, "\n")] = '\0';
+        src[strcspn(src, "\n")] = '\0';
 
-        if (strlen(buffer) == 0) break;
+        if (strlen(src) == 0) continue;
 
-        if (buffer[0] == ':')
+        if (src[0] == ':')
         {
-            if (strcmp(buffer, ":q") == 0)
+            if (strcmp(src, ":q") == 0)
                 break;
 
-            if (strcmp(buffer, ":eval") == 0)
+            if (strcmp(src, ":eval") == 0)
                 mode = REPL_EVAL;
 
-            else if (strcmp(buffer, ":ast") == 0)
+            else if (strcmp(src, ":ast") == 0)
                 mode = REPL_AST;
 
-            else if (strcmp(buffer, ":token") == 0)
+            else if (strcmp(src, ":token") == 0)
                 mode = REPL_TOKEN;
 
             else
@@ -64,17 +62,20 @@ void repl_start(void)
             continue;
         }
 
-        if (!tokenize(&l, buffer))
+        if (!tokenize(&ta, src))
         {
             printf("Invalid expression.\n");
             continue;
         }
 
-        e = parse_expr(&p, PREC_PRIMARY);
-        if (is_error(e))
+        if (mode != REPL_TOKEN)
         {
-            parser_diagnostics(&p, e);
-            continue;
+            e = parse_expr(&p, PREC_PRIMARY);
+            if (is_error(e))
+            {
+                diagnostics_print(e, src);
+                continue;
+            }
         }
 
         switch (mode)
@@ -92,7 +93,7 @@ void repl_start(void)
                 break;
 
             case REPL_TOKEN:
-                lexer_print(&l);
+                ta_print(&ta);
                 break;
         }
     }

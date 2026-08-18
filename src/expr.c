@@ -142,3 +142,16 @@ void ast_print(Expr *e, int indent)
     indent--;
     printf_indent(indent, "},\n");
 }
+
+// Prints the diagnostic message.
+void diagnostics_print(Expr *e, const char *src)
+{
+    if (e->kind != EXPR_ERROR) return;
+
+    printf("%s\n", src);
+    for (size_t i = 0; i < e->pos; i++)
+        printf(" ");
+
+    printf("^ %s\n", e->as.error.msg);
+}
+

@@ -1,6 +1,5 @@
 #include "parser.h"
 #include <string.h>
-#include <stdio.h>
 
 // Cast the token as an infix operator.
 static Operator token_as_infix_op(Token t)
@@ -25,7 +24,6 @@ static Operator token_as_prefix_op(Token t)
     }
 }
 
-
 // Get the precedence of the token.
 static OpPrec token_get_prec(Token t)
 {
@@ -44,11 +42,10 @@ static OpPrec token_get_prec(Token t)
     }
 }
 
-
 // Intiialize a parser with a reference to the lexer.
-void parser_init(Parser *p, const Lexer *l)
+void parser_init(Parser *p, const TokenArray *ta)
 {
-    p->lex = l;
+    p->ta = ta;
     p->pos = 0;
 }
 
@@ -61,15 +58,15 @@ void parser_reset(Parser *p)
 // Get the current token of the parser.
 static Token parser_get_token(const Parser *p)
 {
-    return p->lex->tokens[p->pos];
+    return p->ta->data[p->pos];
 }
 
 // Advance the parser.
 static void parser_advance(Parser *p)
 {
-    if (p->pos >= p->lex->len)
+    if (p->pos >= p->ta->len)
     {
-        p->pos = p->lex->len-1;
+        p->pos = p->ta->len-1;
         return;
     }
     p->pos++;
@@ -88,6 +85,14 @@ static bool parser_expect(const Parser *p, TokenKind tk)
     return t.kind == tk;
 }
 
+// Checks if the current token is a number.
+static bool parser_expect_number(const Parser *p)
+{
+    Token t = parser_get_token(p);
+    return t.kind == TOK_LBRAC 
+        || t.kind == TOK_ALNUM || t.kind == TOK_DIGIT;
+}
+
 // Get the current precedence.
 static int parser_get_prec(const Parser *p)
 {
@@ -98,20 +103,8 @@ static int parser_get_prec(const Parser *p)
 static Expr *parser_error(Parser *p, const char *msg)
 {
     Expr *err = expr_error(msg);
-    err->start = parser_get_token(p).start;
+    err->pos = parser_get_token(p).pos;
     return err;
-}
-
-// Prints the error expression.
-void parser_diagnostics(Parser *p, Expr *err)
-{
-    if (err->kind != EXPR_ERROR) return;
-
-    printf("%s\n", p->lex->src);
-    for (size_t i = 0; i < err->start; i++)
-        printf(" ");
-
-    printf("^ %s\n", err->as.error.msg);
 }
 
 #define ENSURE_NOT_ERR(e) do { \
@@ -176,7 +169,7 @@ static Expr *parse_prefix(Parser *p)
         return parser_error(p, "Unknown infix operator");
 
     parser_advance(p);
-    if (!parser_expect(p, TOK_LPAREN) && !parser_expect(p, TOK_NUMBER))
+    if (!parser_expect(p, TOK_LPAREN) && !parser_expect_number(p))
     {
         return parser_error(p, "Expected number or group");
     }
@@ -198,11 +191,15 @@ Expr *parse_expr(Parser *p, int prec)
     {
         case TOK_EOF:    return parser_error(p, "Unexpected EOF");
 
-        case TOK_NUMBER: e = parse_number(p); break;
+        case TOK_DIGIT:
+        case TOK_ALNUM:  e = parse_number(p); break;
+
         case TOK_LPAREN: e = parse_group(p);  break;
+
         case TOK_MINUS:  e = parse_prefix(p); break;
 
-        default:         return parser_error(p, "Unexpected token");
+        case TOK_LBRAC:  return parser_error(p, "Digit list not implemented");
+        default:         return parser_error(p, "Expected expression");
     }
 
     int current_prec = parser_get_prec(p);

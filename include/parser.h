@@ -8,15 +8,12 @@
 // Parser for parsing tokens into AST.
 typedef struct
 {
-    const Lexer *lex;
+    const TokenArray *ta;
     size_t pos;
 } Parser;
 
-
-void parser_init(Parser *p, const Lexer *l);
+void parser_init(Parser *p, const TokenArray *ta);
 void parser_reset(Parser *p);
-
-void parser_diagnostics(Parser *p, Expr *err);
 
 Expr *parse_expr(Parser *p, int prec);
 

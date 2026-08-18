@@ -64,9 +64,7 @@ typedef struct Expr
     } as;
     ExprKind kind;
 
-    // The start position of the span.
-    // TODO: use a shared span structure across tokens and expressions.
-    size_t start;
+    size_t pos;
 } Expr;
 
 Expr *expr_new(ExprKind kind);
@@ -78,6 +76,8 @@ bool is_error(Expr *e);
 Expr *expr_number(mpq_t value);
 Expr *expr_infix(Expr *l, Operator op, Expr *r);
 Expr *expr_prefix(Operator op, Expr *expr);
+
 void ast_print(Expr *e, int indent);
+void diagnostics_print(Expr *e, const char *src);
 
 #endif

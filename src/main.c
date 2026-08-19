@@ -47,7 +47,7 @@ int main(int argc, char **argv)
     {
         bool ok = vm_evaluate(&vm, argv[2], &value);
         vm_value_print(&value, argv[2]);
-        return ok;
+        return ok ? 0 : 1;
     }
     else
     {

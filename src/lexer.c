@@ -4,30 +4,7 @@
 #include <stdio.h>
 #include <assert.h>
 
-// Convert a token kind to string.
-static const char *token_kind_str[] = {
-    [TOK_EOF]     = "EOF",
-    [TOK_SPACE]   = "SPACE",
-    [TOK_INVALID] = "INVALID",
-
-    [TOK_ALPHA]   = "ALPHA",
-    [TOK_DIGIT]   = "DIGIT",
-    [TOK_ALNUM]   = "ALNUM",
-
-    [TOK_PLUS]    = "PLUS",
-    [TOK_MINUS]   = "MINUS",
-    [TOK_STAR]    = "STAR",
-    [TOK_SLASH]   = "SLASH",
-
-    [TOK_DOT]     = "DOT",
-    [TOK_COMMA]   = "COMMA",
-    [TOK_HASH]    = "HASH",
-
-    [TOK_LBRAC]   = "LBRAC",
-    [TOK_RBRAC]   = "RBRAC",
-    [TOK_LPAREN]  = "LPAREN",
-    [TOK_RPAREN]  = "RPAREN",
-};
+const char *tk_to_str[] = {TOKENS(AS_STR)};
 
 // Get the kind of token based on the first character.
 static TokenKind token_kind_get(char c)
@@ -60,10 +37,13 @@ static TokenKind token_kind_get(char c)
 static bool ta_init_or_reset(TokenArray *ta)
 {
     assert(ta);
-    ta->cap = 128;
     ta->len = 0;
 
-    if (!ta->data) ta->data = malloc(sizeof(Token) * ta->cap);
+    if (!ta->data) 
+    {
+        ta->cap = 128;
+        ta->data = malloc(sizeof(Token) * ta->cap);
+    }
     if (!ta->data) return false;
     return true;
 }
@@ -74,7 +54,7 @@ static bool ta_push(TokenArray *ta, Token tok)
     if (ta->len + 1 > ta->cap)
     {
         size_t new_cap = ta->cap * 2;
-        Token *new_data = realloc(ta->data, new_cap);
+        Token *new_data = realloc(ta->data, new_cap * sizeof(Token));
         if (!new_data) return false;
         ta->data = new_data;
         ta->cap = new_cap;
@@ -83,6 +63,7 @@ static bool ta_push(TokenArray *ta, Token tok)
     return true;
 }
 
+// Free a token array.
 void ta_free(TokenArray *ta)
 {
     if (!ta) return;
@@ -93,26 +74,13 @@ void ta_free(TokenArray *ta)
     ta->data = NULL;
 }
 
-// Print the tokens in the lexer.
-void ta_print(const TokenArray *ta)
-{
-    for (size_t i = 0; i < ta->len; i++)
-    {
-        Token tok = ta->data[i];
-        printf("%02zu: %s", i, token_kind_str[tok.kind]);
-
-        if (tok.len > 0)
-            printf("(%.*s)", (int)tok.len, tok.data);
-
-        printf("\n");
-    }
-}
-
+// Create a token.
 static Token token_create(TokenKind kind, size_t pos)
 {
     return (Token){.data=NULL, .len=0, .pos=pos, .kind=kind};
 }
 
+// Return a token with additional data.
 static Token token_with_data(Token tok, const char *data, size_t len)
 {
     tok.data = data;
@@ -158,7 +126,7 @@ bool tokenize(TokenArray *ta, const char *src)
                 break;
             }
 
-            Token tok = token_create(kind, i);
+            Token tok = token_create(kind, start);
             ta_push(ta, token_with_data(tok, src+start, i-start));
         }
         else

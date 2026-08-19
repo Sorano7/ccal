@@ -3,31 +3,40 @@
 
 #include <stddef.h>
 
+#define TOKENS(X) \
+    X(TOK_EOF,     "EOF") \
+    X(TOK_SPACE,   " ") \
+    X(TOK_INVALID, "<invalid>") \
+\
+    X(TOK_ALPHA,   "alphabets") \
+    X(TOK_DIGIT,   "digits") \
+    X(TOK_ALNUM,   "alphanumerics") \
+\
+    X(TOK_PLUS,    "+") \
+    X(TOK_MINUS,   "-") \
+    X(TOK_STAR,    "*") \
+    X(TOK_SLASH,   "/") \
+\
+    X(TOK_DOT,     ".") \
+    X(TOK_COMMA,   ",") \
+    X(TOK_HASH,    "#") \
+\
+    X(TOK_LBRAC,   "[") \
+    X(TOK_RBRAC,   "]") \
+    X(TOK_LPAREN,  "(") \
+    X(TOK_RPAREN,  ")")
+
+#define AS_ENUM(name, _) name,
+#define AS_STR(name, s)  [name] = (s),
+
 // Kinds of a token.
 typedef enum
 {
-    TOK_EOF,
-    TOK_SPACE,
-    TOK_INVALID,
-
-    TOK_ALPHA,
-    TOK_DIGIT,
-    TOK_ALNUM,
-
-    TOK_PLUS,
-    TOK_MINUS,
-    TOK_STAR,
-    TOK_SLASH,
-
-    TOK_DOT,
-    TOK_COMMA,
-    TOK_HASH,
-
-    TOK_LBRAC,
-    TOK_RBRAC,
-    TOK_LPAREN,
-    TOK_RPAREN,
+    TOKENS(AS_ENUM)
 } TokenKind;
+
+// Lookup the string representation of the token kind.
+extern const char *tk_to_str[];
 
 // A token.
 typedef struct

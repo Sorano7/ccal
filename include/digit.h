@@ -6,13 +6,6 @@
 
 typedef enum
 {
-    DIGIT_OK,
-    DIGIT_INVALID,
-    DIGIT_OUT_OF_BASE,
-} DigitError;
-
-typedef enum
-{
     DIGIT_FMT_ALNUM,
     DIGIT_FMT_LIST,
 } DigitFormat;
@@ -25,16 +18,30 @@ typedef struct
 
 typedef struct
 {
-    const Digits *I;
-    const Digits *N;
-    const Digits *R;
+    Digits I;
+    Digits N;
+    Digits R;
 } Literal;
 
-void digits_init(Digits *ds, size_t len);
-void digits_free(Digits *ds);
+typedef enum
+{
+    DIGIT_OK,
+    DIGIT_INVALID,
+    DIGIT_OOB,
+} DRKind;
 
-DigitError digits_from_alnum(Digits *ds, const char *s, size_t len, unsigned long base);
+typedef struct
+{
+    size_t pos;
+    DRKind kind;
+} DigitResult;
 
+void digits_alloc(Digits *ds, size_t len);
+
+DigitResult digits_from_alnum(Digits *ds, const char *s, size_t len, unsigned long base);
+
+void literal_init(Literal *lit);
+void literal_free(Literal *lit);
 void literal_to_mpq(Literal *lit, unsigned long base, mpq_t out);
 
 #endif

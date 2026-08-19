@@ -431,6 +431,8 @@ static bool eval_nud(VM *v, Value *out)
 
 #define MPQ_INFIX(f, l, r) f((l)->as.number, (l)->as.number, (r)->as.number)
 
+#define MPQ_CMP(l, r) mpq_cmp((l)->as.number, (r)->as.number)
+
 static bool eval_number_power(Value *l, Value *r, size_t r_pos)
 {
     if (mpz_cmp_ui(mpq_denref(r->as.number), 1) == 0)
@@ -475,6 +477,30 @@ static bool eval_number_infix(Value *l, Token op, Value *r, size_t r_pos)
 
         case TOK_CARET:
             return eval_number_power(l, r, r_pos);
+
+        case TOK_LT:
+            value_bool(l, MPQ_CMP(l, r) < 0);
+            break;
+
+        case TOK_LEQ:
+            value_bool(l, MPQ_CMP(l, r) <= 0);
+            break;
+
+        case TOK_GT:
+            value_bool(l, MPQ_CMP(l, r) > 0);
+            break;
+
+        case TOK_GEQ:
+            value_bool(l, MPQ_CMP(l, r) >= 0);
+            break;
+
+        case TOK_EQ:
+            value_bool(l, MPQ_CMP(l, r) == 0);
+            break;
+
+        case TOK_NEQ:
+            value_bool(l, MPQ_CMP(l, r) != 0);
+            break;
 
         default:
             return value_errorf(l, op.pos, "Unknown operator");
@@ -537,7 +563,8 @@ bool vm_evaluate(VM *v, const char *src, Value *out)
     out->kind = VAL_VOID;
 
     TokenArray ta = {0};
-    assert(tokenize(&ta, src));
+    if (!tokenize(&ta, src))
+        return value_errorf(out, ta.data[0].pos, "Invalid token");
     v->ta = &ta;
 
     return eval_expr(v, PREC_PRIMARY, out);

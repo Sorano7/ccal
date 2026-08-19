@@ -12,18 +12,38 @@ typedef struct
     size_t pos;
 } VM;
 
+// Kinds of a value.
+typedef enum
+{
+    VAL_VOID,
+    VAL_ERROR,
+    VAL_NUMBER,
+    VAL_BOOL,
+} ValueKind;
+
+// A value that an expression can evaluate to.
 typedef struct
 {
-    bool ok;
-    size_t span_start;
-    char *msg;
-} VMResult;
+    ValueKind kind;
+    union
+    {
+        struct
+        {
+            size_t pos;
+            char *msg;
+        } error;
+
+        mpq_t number;
+
+        bool boolean;
+    } as;
+} Value;
 
 void vm_init(VM *v);
 void vm_free(VM *v);
 
-VMResult vm_evaluate(VM *v, const char *src, mpq_t out);
-void vm_diagnostics(VMResult *r, const char *src);
-void vm_result_free(VMResult *r);
+bool vm_evaluate(VM *v, const char *src, Value *out);
+void vm_value_print(Value *v, const char *src);
+void vm_value_free(Value *v);
 
 #endif

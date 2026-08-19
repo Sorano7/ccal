@@ -6,15 +6,27 @@
 
 const char *tk_to_str[] = {TOKENS(AS_STR)};
 
-// Get the kind of token based on the first character.
-static TokenKind token_kind_get(char c)
+#define NEXT_IS_THEN(src, i, c, tk) do { \
+    if ((src)[(i)+1] && (src)[i] == (c)) { \
+        i++; \
+        return (tk); \
+    } \
+} while (0)
+
+// Get the kind of token at the pointer.
+static TokenKind token_kind_get(const char *src, size_t i)
 {
-    switch (c)
+    if (isdigit(src[i])) return TOK_DIGIT;
+    if (isalpha(src[i])) return TOK_ALPHA;
+    if (isspace(src[i])) return TOK_SPACE;
+
+    switch (src[i])
     {
         case '+': return TOK_PLUS;
         case '-': return TOK_MINUS;
         case '*': return TOK_STAR;
         case '/': return TOK_SLASH;
+        case '^': return TOK_CARET;
 
         case '.': return TOK_DOT;
         case ',': return TOK_COMMA;
@@ -24,11 +36,23 @@ static TokenKind token_kind_get(char c)
         case ']': return TOK_RBRAC;
         case '(': return TOK_LPAREN;
         case ')': return TOK_RPAREN;
-    }
 
-    if (isdigit(c)) return TOK_DIGIT;
-    if (isalpha(c)) return TOK_ALPHA;
-    if (isspace(c)) return TOK_SPACE;
+        case '=':
+            NEXT_IS_THEN(src, i, '=', TOK_EQ);
+            break;
+
+        case '!':
+            NEXT_IS_THEN(src, i, '=', TOK_NEQ);
+            break;
+
+        case '<':
+            NEXT_IS_THEN(src, i, '=', TOK_LEQ);
+            return TOK_LT;
+
+        case '>':
+            NEXT_IS_THEN(src, i, '=', TOK_GEQ);
+            return TOK_GT;
+    }
 
     return TOK_INVALID;
 }
@@ -96,45 +120,41 @@ bool tokenize(TokenArray *ta, const char *src)
     size_t i = 0;
     while (src[i] != '\0')
     {
-        TokenKind kind = token_kind_get(src[i]);
-        if (kind == TOK_INVALID) return false;
+        TokenKind kind = token_kind_get(src, i);
 
-        if (kind == TOK_SPACE)
+        switch (kind)
         {
-            i++;
-            continue;
-        }
+            case TOK_INVALID:
+                return false;
 
-        if (kind == TOK_DIGIT || kind == TOK_ALPHA)
-        {
-            size_t start = i;
-            for (;;)
-            {
-                TokenKind new_kind = token_kind_get(src[i]);
-                switch (new_kind)
+            case TOK_SPACE:
+                i++;
+                continue;
+
+            case TOK_DIGIT:
+            case TOK_ALPHA:
+                size_t start = i;
+                for (;;)
                 {
-                    case TOK_ALPHA:
+                    TokenKind new_kind = token_kind_get(src, i);
+                    if (new_kind == TOK_ALPHA)
                         kind = TOK_ALNUM;
-                        // fallthrough
-                    case TOK_DIGIT:
-                        i++;
-                        continue;
-
-                    default:
+                    else if (new_kind != TOK_DIGIT)
                         break;
+                    i++;
                 }
-                break;
-            }
 
-            Token tok = token_create(kind, start);
-            ta_push(ta, token_with_data(tok, src+start, i-start));
-        }
-        else
-        {
-            ta_push(ta, token_create(kind, i));
-            i++;
+                Token tok = token_create(kind, start);
+                ta_push(ta, token_with_data(tok, src+start, i-start));
+                break;
+
+            default:
+                ta_push(ta, token_create(kind, i));
+                i++;
+                break;
         }
     }
+
     ta_push(ta, token_create(TOK_EOF, i));
     return true;
 }

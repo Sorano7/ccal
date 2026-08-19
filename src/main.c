@@ -4,7 +4,7 @@
 #include "vm.h"
 
 // Start REPL.
-void repl_start(VM *vm, mpq_t value)
+void repl_start(VM *vm, Value *value)
 {
     for (;;)
     {
@@ -21,24 +21,15 @@ void repl_start(VM *vm, mpq_t value)
         {
             if (strcmp(src, ":q") == 0)
                 break;
-
             else
                 printf("Unknown command.\n");
 
             continue;
         }
 
-        VMResult res = vm_evaluate(vm, src, value);
-
-        if (res.ok)
-            gmp_printf("%Qd\n", value);
-        else
-            vm_diagnostics(&res, src);
-
-        vm_result_free(&res);
+        vm_evaluate(vm, src, value);
+        vm_value_print(value, src);
     }
-
-    mpq_clear(value);
 }
 
 int main(int argc, char **argv)
@@ -46,28 +37,17 @@ int main(int argc, char **argv)
     VM vm;
     vm_init(&vm);
 
-    mpq_t value;
-    mpq_init(value);
+    Value value = {0};
 
     if (argc == 1)
     {
-        repl_start(&vm, value);
+        repl_start(&vm, &value);
     }
     else if (argc == 3 && strcmp(argv[1], "run") == 0)
     {
-        VMResult res = vm_evaluate(&vm, argv[2], value);
-        if (res.ok)
-        {
-            gmp_printf("%Qd\n", value);
-            vm_result_free(&res);
-            return 0;
-        }
-        else
-        {
-            vm_diagnostics(&res, argv[2]);
-            vm_result_free(&res);
-            return 1;
-        }
+        bool ok = vm_evaluate(&vm, argv[2], &value);
+        vm_value_print(&value, argv[2]);
+        return ok;
     }
     else
     {
@@ -77,5 +57,6 @@ int main(int argc, char **argv)
             "    ccal run <expr>    evaluate and print the result\n");
         return 1;
     }
+
     return 0;
 }

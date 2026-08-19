@@ -16,6 +16,15 @@
     X(TOK_MINUS,   "-") \
     X(TOK_STAR,    "*") \
     X(TOK_SLASH,   "/") \
+    X(TOK_CARET,   "^") \
+\
+    X(TOK_GT,      ">") \
+    X(TOK_GEQ,     ">=") \
+    X(TOK_LT,      "<") \
+    X(TOK_LEQ,     "<=") \
+\
+    X(TOK_EQ,      "==") \
+    X(TOK_NEQ,     "!=") \
 \
     X(TOK_DOT,     ".") \
     X(TOK_COMMA,   ",") \

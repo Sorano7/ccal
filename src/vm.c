@@ -10,12 +10,110 @@
 #define BASE_DEFAULT 10
 #define BASE_MAX ULONG_MAX
 
+// Lookup of string names for value kind.
+static const char *vk_to_str[] = {
+    [VAL_VOID]    = "void",
+    [VAL_ERROR]   = "error",
+    [VAL_NUMBER]  = "number",
+    [VAL_BOOL]    = "bool",
+};
+
+// Free the value.
+void vm_value_free(Value *v)
+{
+    if (!v) return;
+    switch (v->kind)
+    {
+        case VAL_NUMBER:
+            mpq_clear(v->as.number);
+            break;
+
+        case VAL_ERROR:
+            if (v->as.error.msg)
+                free(v->as.error.msg);
+            break;
+
+        default:
+            break;
+    }
+}
+
+// Set a value from another value.
+static void value_set(Value *v, Value *from)
+{
+    v->kind = from->kind;
+    switch (v->kind)
+    {
+        case VAL_VOID:
+            break;
+
+        case VAL_NUMBER:
+            mpq_set(v->as.number, from->as.number);
+            break;
+
+        case VAL_BOOL:
+            v->as.boolean = from->as.boolean;
+            break;
+
+        case VAL_ERROR:
+            v->as.error.pos = from->as.error.pos;
+            v->as.error.msg = strdup(from->as.error.msg);
+            break;
+    }
+}
+
+// Intializes a number value.
+static void value_number(Value *v)
+{
+    assert(v);
+    v->kind = VAL_NUMBER;
+    mpq_init(v->as.number);
+}
+
+// Initializes a bool value.
+static void value_bool(Value *v, bool b)
+{
+    assert(v);
+    v->kind = VAL_BOOL;
+    v->as.boolean = b;
+}
+
+// Create a formatted error value pointing to the position.
+static bool value_errorf(Value *v, size_t pos, const char *fmt, ...)
+{
+    vm_value_free(v);
+
+    v->kind = VAL_ERROR;
+    v->as.error.pos = pos;
+
+    va_list args, copy;
+    va_start(args, fmt);
+    va_copy(copy, args);
+
+    int len = vsnprintf(NULL, 0, fmt, copy);
+    va_end(copy);
+
+    if (len > 0)
+    {
+        v->as.error.msg = malloc(len+1);
+        assert(v->as.error.msg);
+
+        vsnprintf(v->as.error.msg, len+1, fmt, args);
+    }
+
+    va_end(args);
+    return false;
+}
+
 // Operator precedence levels.
 typedef enum
 {
     PREC_PRIMARY,
+    PREC_EQUALITY,
+    PREC_COMPARISON,
     PREC_SUM,
     PREC_PRODUCT,
+    PREC_POWER,
     PREC_PREFIX,
     PREC_BASE,
 } OpPrec;
@@ -25,6 +123,16 @@ static OpPrec token_get_prec(Token t)
 {
     switch (t.kind)
     {
+        case TOK_EQ:
+        case TOK_NEQ:
+            return PREC_EQUALITY;
+
+        case TOK_LT:
+        case TOK_LEQ:
+        case TOK_GT:
+        case TOK_GEQ:
+            return PREC_COMPARISON;
+
         case TOK_PLUS:
         case TOK_MINUS:
             return PREC_SUM;
@@ -32,6 +140,9 @@ static OpPrec token_get_prec(Token t)
         case TOK_STAR:
         case TOK_SLASH:
             return PREC_PRODUCT;
+
+        case TOK_CARET:
+            return PREC_POWER;
 
         default:
             return PREC_PRIMARY;
@@ -104,48 +215,14 @@ static size_t vm_find_next(VM *v, TokenKind tk)
     return d;
 }
 
-// Create a formatted error result pointing to the position.
-static VMResult errorf_at(size_t pos, const char *fmt, ...)
-{
-    VMResult r = {.ok=false, .span_start=pos, .msg=NULL};
-
-    va_list args, copy;
-    va_start(args, fmt);
-    va_copy(copy, args);
-
-    int len = vsnprintf(NULL, 0, fmt, copy);
-    va_end(copy);
-
-    if (len > 0)
-    {
-        r.msg = malloc(len+1);
-        assert(r.msg);
-
-        vsnprintf(r.msg, len+1, fmt, args);
-    }
-
-    va_end(args);
-
-    return r;
-}
-
-#define errorf_tok(tok, fmt, ...) errorf_at((tok.pos), \
-        (fmt) __VA_OPT__(,) __VA_ARGS__)
-
-#define EVAL_OK (VMResult){.ok=true, .span_start=0, .msg=0}
-
-#define CONSUME_EXPECT(v, tk) do { \
-    if (vm_token(v).kind != tk) \
-        return errorf_tok(vm_token(v), "Expected '%s'", tk_to_str[tk]); \
+#define CONSUME_EXPECT(v, tk, err) do { \
+    Token t = vm_token(v); \
+    if (t.kind != tk) \
+        return value_errorf(err, t.pos, "Expected '%s'", tk_to_str[tk]); \
     (v)->pos++; \
 } while (0)
 
-#define ENSURE_OK(r) do { \
-    VMResult __tmp = (r); \
-    if (!__tmp.ok) return __tmp; \
-} while (0)
-
-static VMResult eval_expr(VM *v, int prec, mpq_t out);
+static bool eval_expr(VM *v, int prec, Value *out);
 
 // Convert a token to an unsigned long value.
 // t must be TOK_DIGIT.
@@ -166,86 +243,87 @@ static bool token_to_ul(Token t, unsigned long *out)
 }
 
 // Parse an alphanumeric number part.
-static VMResult parse_number_part_alnum(VM *v, Digits *ds)
+static bool parse_number_part_alnum(VM *v, Digits *ds, Value *err)
 {
     Token t = vm_token(v);
     if (!vm_is_alnum(v))
-        return errorf_tok(t, "Expected alphanumerics");
+        return value_errorf(err, t.pos, "Expected alphanumerics");
 
     DigitResult res = digits_from_alnum(ds, t.data, t.len, v->base);
     switch (res.kind)
     {
         case DIGIT_INVALID:
-            return errorf_at(t.pos+res.pos, "Not a digit");
+            return value_errorf(err, t.pos+res.pos, "Not a digit");
         case DIGIT_OOB:
-            return errorf_at(t.pos+res.pos, "Digit out of bounds for base %lu", v->base);
+            return value_errorf(err, t.pos+res.pos, "Digit out of bounds for base %lu", v->base);
         default:
             break;
     }
 
     v->pos++;
-    return EVAL_OK;
+    return true;
 }
 
-static VMResult parse_number_part_list(VM *v, Digits *ds)
+static bool parse_number_part_list(VM *v, Digits *ds, Value *err)
 {
     Token t = vm_token(v);
     if (!vm_is_digit_list(v))
-        return errorf_tok(t, "Expected digit list");
+        return value_errorf(err, t.pos, "Expected digit list");
 
-    CONSUME_EXPECT(v, TOK_LBRAC);
+    CONSUME_EXPECT(v, TOK_LBRAC, err);
     size_t i = 0;
     size_t len = vm_find_next(v, TOK_RBRAC);
     if (len == SIZE_MAX)
-        return errorf_tok(vm_token(v), "Expected ']");
+        return value_errorf(err, vm_token(v).pos, "Expected ']");
 
     digits_alloc(ds, len);
     for (;;)
     {
         t = vm_token(v);
         if (t.kind != TOK_DIGIT)
-            return errorf_tok(t, "Expected numeric value as digit");
+            return value_errorf(err, t.pos, "Expected numeric value as digit");
 
         unsigned long val;
         if (!token_to_ul(t, &val) || val >= v->base)
-            return errorf_tok(t, "Digit out of bounds");
+            return value_errorf(err, t.pos, "Digit out of bounds");
         v->pos++;
 
         ds->data[i++] = val;
         if (vm_token(v).kind == TOK_RBRAC) break;
-        CONSUME_EXPECT(v, TOK_COMMA);
+        CONSUME_EXPECT(v, TOK_COMMA, err);
     }
     ds->len = i;
-    CONSUME_EXPECT(v, TOK_RBRAC);
+    CONSUME_EXPECT(v, TOK_RBRAC, err);
 
-    return EVAL_OK;
+    return true;
 }
 
 // Parse a number part (I, N, or R) into a sequence of digits.
 // Ensure the number is in the same format as fmt.
-static VMResult parse_number_part(VM *v, Digits *ds, DigitFormat fmt)
+static bool parse_number_part(VM *v, Digits *ds, DigitFormat fmt, Value *err)
 {
     switch (fmt)
     {
         case DIGIT_FMT_ALNUM:
-            return parse_number_part_alnum(v, ds);
+            return parse_number_part_alnum(v, ds, err);
 
         case DIGIT_FMT_LIST:
-            return parse_number_part_list(v, ds);
+            return parse_number_part_list(v, ds, err);
 
         default:
-            return errorf_tok(vm_token(v), "Expected number");
+            return value_errorf(err, vm_token(v).pos, "Expected number");
     }
 }
 
 // Evaluate a number literal.
-static VMResult eval_number(VM *v, DigitFormat fmt, mpq_t out)
+static bool eval_number(VM *v, DigitFormat fmt, Value *out)
 {
-    VMResult res = EVAL_OK;
+    bool ok = true;
 
     Literal lit;
     literal_init(&lit);
-    ENSURE_OK((res = parse_number_part(v, &lit.I, fmt)));
+    if (!(ok = parse_number_part(v, &lit.I, fmt, out)))
+        goto cleanup;
 
     if (vm_token(v).kind != TOK_DOT)
         goto eval;
@@ -253,73 +331,85 @@ static VMResult eval_number(VM *v, DigitFormat fmt, mpq_t out)
 
     if (vm_token(v).kind != TOK_LPAREN)
     {
-        res = parse_number_part(v, &lit.N, fmt);
-        if (!res.ok) goto cleanup;
+        if (!(ok = parse_number_part(v, &lit.N, fmt, out)))
+            goto cleanup;
     }
 
     if (vm_token(v).kind == TOK_LPAREN)
     {
         v->pos++;
-        res = parse_number_part(v, &lit.R, fmt);
-        if (!res.ok) goto cleanup;
-        CONSUME_EXPECT(v, TOK_RPAREN);
+        if (!(ok = parse_number_part(v, &lit.R, fmt, out)))
+            goto cleanup;
+        CONSUME_EXPECT(v, TOK_RPAREN, out);
     }
 
 eval:
-    literal_to_mpq(&lit, v->base, out);
+    value_number(out);
+    literal_to_mpq(&lit, v->base, out->as.number);
 
 cleanup:
     literal_free(&lit);
-    return res;
+    return ok;
 }
 
 // Evaluate a base annotation prefix.
-static VMResult eval_base(VM *v, mpq_t out)
+static bool eval_base(VM *v, Value *out)
 {
     Token t = vm_token(v);
-    CONSUME_EXPECT(v, TOK_DIGIT);
-    CONSUME_EXPECT(v, TOK_HASH);
+    CONSUME_EXPECT(v, TOK_DIGIT, out);
+    CONSUME_EXPECT(v, TOK_HASH, out);
 
     unsigned long prev_base = v->base;
 
     if (!token_to_ul(t, &v->base))
-        return errorf_tok(t, "Base too large");
+        return value_errorf(out, t.pos, "Base too large");
     if (v->base <= 1)
-        return errorf_tok(t, "Base must be at least 2");
+        return value_errorf(out, t.pos, "Base must be at least 2");
 
-    VMResult r = eval_expr(v, PREC_BASE, out);
+    bool ok = eval_expr(v, PREC_BASE, out);
     v->base = prev_base;
 
-    return r;
+    return ok;
 }
 
 // Evaluate a group expression.
-static VMResult eval_group(VM *v, mpq_t out)
+static bool eval_group(VM *v, Value *out)
 {
-    CONSUME_EXPECT(v, TOK_LPAREN);
-        ENSURE_OK(eval_expr(v, PREC_PRIMARY, out));
-    CONSUME_EXPECT(v, TOK_RPAREN);
-    return EVAL_OK;
+    CONSUME_EXPECT(v, TOK_LPAREN, out);
+        if (!eval_expr(v, PREC_PRIMARY, out))
+            return false;
+    CONSUME_EXPECT(v, TOK_RPAREN, out);
+    return true;
 }
 
 // Evaluate a negation expression.
-static VMResult eval_neg(VM *v, mpq_t out)
+static bool eval_neg(VM *v, Value *out)
 {
-    CONSUME_EXPECT(v, TOK_MINUS);
+    CONSUME_EXPECT(v, TOK_MINUS, out);
 
     Token t = vm_token(v);
-    bool num_or_group = t.kind == TOK_LPAREN || vm_is_alnum(v) || vm_is_digit_list(v);
+    bool num_or_group = t.kind == TOK_LPAREN || vm_is_alnum(v) 
+        || vm_is_digit_list(v);
     if (!num_or_group)
-        return errorf_tok(t, "Expected number or group");
+        return value_errorf(out, t.pos, "Expected number or group");
 
-    ENSURE_OK(eval_expr(v, PREC_PREFIX, out));
-    mpq_neg(out, out);
-    return EVAL_OK;
+    if (!eval_expr(v, PREC_PREFIX, out))
+        return false;
+
+    if (out->kind != VAL_NUMBER)
+        return false;
+
+    mpq_neg(out->as.number, out->as.number);
+    return true;
 }
 
 // Evaluate a null denotation expression.
-static VMResult eval_nud(VM *v, mpq_t out)
+static bool eval_nud(VM *v, Value *out)
 {
+    Token t = vm_token(v);
+    if (t.kind == TOK_EOF)
+        return value_errorf(out, t.pos, "Expected expression");
+
     if (vm_peek(v, 1).kind == TOK_HASH)
         return eval_base(v, out);
 
@@ -329,108 +419,153 @@ static VMResult eval_nud(VM *v, mpq_t out)
     else if (vm_is_digit_list(v))
         return eval_number(v, DIGIT_FMT_LIST, out);
 
-    Token t = vm_token(v);
-    switch (t.kind)
-    {
-        case TOK_LPAREN: return eval_group(v, out);
-        case TOK_MINUS:  return eval_neg(v, out);
+    else if (t.kind == TOK_LPAREN)
+        return eval_group(v, out);
 
-        case TOK_EOF:
-        default:         return errorf_tok(t, "Expected expression");
+    else if (t.kind == TOK_MINUS)
+        return eval_neg(v, out);
+
+    else
+        return value_errorf(out, t.pos, "Expected expression");
+}
+
+#define MPQ_INFIX(f, l, r) f((l)->as.number, (l)->as.number, (r)->as.number)
+
+static bool eval_number_power(Value *l, Value *r, size_t r_pos)
+{
+    if (mpz_cmp_ui(mpq_denref(r->as.number), 1) == 0)
+    {
+        if (!mpz_fits_ulong_p(mpq_numref(r->as.number)))
+            return value_errorf(l, r_pos, "Exponent too large");
+
+        unsigned long exp = mpz_get_ui(mpq_numref(r->as.number));
+        mpz_pow_ui(mpq_numref(l->as.number), mpq_numref(l->as.number), exp);
+        mpz_pow_ui(mpq_denref(l->as.number), mpq_denref(l->as.number), exp);
+        mpq_canonicalize(l->as.number);
     }
+    else
+    {
+        return value_errorf(l, r_pos, "Non-integer exponent is not supported");
+    }
+    return true;
+}
+
+// Evaluate infix operation between numbers.
+static bool eval_number_infix(Value *l, Token op, Value *r, size_t r_pos)
+{
+    switch (op.kind)
+    {
+        case TOK_PLUS:
+            MPQ_INFIX(mpq_add, l, r);
+            break;
+
+        case TOK_MINUS:
+            MPQ_INFIX(mpq_sub, l, r);
+            break;
+
+        case TOK_STAR:
+            MPQ_INFIX(mpq_mul, l, r);
+            break;
+
+        case TOK_SLASH:
+            if (mpq_cmp_ui(r->as.number, 0, 1) == 0)
+                return value_errorf(l, r_pos, "Division by zero");
+            MPQ_INFIX(mpq_div, l, r);
+            break;
+
+        case TOK_CARET:
+            return eval_number_power(l, r, r_pos);
+
+        default:
+            return value_errorf(l, op.pos, "Unknown operator");
+    }
+    return true;
 }
 
 // Evaluate a left denotation expression.
-static VMResult eval_led(VM *v, int prec, mpq_t left)
+static bool eval_led(VM *v, int prec, Value *left)
 {
     Token t = vm_token(v);
     v->pos++;
 
-    mpq_t right;
-    mpq_init(right);
-    ENSURE_OK(eval_expr(v, prec, right));
-
-    switch (t.kind)
+    size_t r_tok_pos = v->pos;
+    Value right = {0};
+    if (!eval_expr(v, prec, &right))
     {
-        case TOK_PLUS:
-            mpq_add(left, left, right);
-            break;
-
-        case TOK_MINUS:
-            mpq_sub(left, left, right);
-            break;
-
-        case TOK_STAR:
-            mpq_mul(left, left, right);
-            break;
-
-        case TOK_SLASH:
-            if (mpq_cmp_ui(right, 0, 1) == 0)
-                return errorf_tok(t, "Division by zero");
-            mpq_div(left, left, right);
-            break;
-
-        default:
-            return errorf_tok(t, "Expected infix operator");
+        value_set(left, &right);
+        vm_value_free(&right);
+        return false;
     }
 
-    mpq_clear(right);
-    return EVAL_OK;
+    if (left->kind != right.kind)
+        return value_errorf(left, t.pos, 
+                "Invalid operation between %s and %s", 
+                vk_to_str[left->kind], vk_to_str[right.kind]);
+
+    switch (left->kind)
+    {
+        case VAL_VOID:    assert(!"void value reached eval_led");
+        case VAL_ERROR:   return false;
+        case VAL_NUMBER:  return eval_number_infix(left, t, &right, r_tok_pos);
+        case VAL_BOOL:    return value_errorf(left, t.pos, "bool is not implemented");
+    }
+
+    vm_value_free(&right);
+    return true;
 }
 
 // Evaluate an expression.
-static VMResult eval_expr(VM *v, int prec, mpq_t out)
+static bool eval_expr(VM *v, int prec, Value *out)
 {
-    mpq_t left;
-    mpq_init(left);
-
-    ENSURE_OK(eval_nud(v, left));
+    if (!eval_nud(v, out))
+        return false;
 
     for (int p = vm_prec(v); p > prec; p = vm_prec(v))
     {
         if (vm_token(v).kind == TOK_EOF) break;
-        ENSURE_OK(eval_led(v, p, left));
+        if (!eval_led(v, p, out))
+            return false;
     }
-
-    mpq_set(out, left);
-    mpq_clear(left);
-    return EVAL_OK;
+    return true;
 }
 
-// Evaluate a source expression. Can be called repeatedly without manual reset.
-// The returned VMResult must be freed.
-VMResult vm_evaluate(VM *v, const char *src, mpq_t out)
+// Evaluate a source expression. out value will be reset but not freed before doing so.
+bool vm_evaluate(VM *v, const char *src, Value *out)
 {
-    assert(v);
+    assert(v && out);
     v->pos = 0;
+    out->kind = VAL_VOID;
 
     TokenArray ta = {0};
     assert(tokenize(&ta, src));
     v->ta = &ta;
 
-    mpq_set_ui(out, 0, 1);
     return eval_expr(v, PREC_PRIMARY, out);
 }
 
-// Prints diagnostic message to stdout.
-// The src string must be the one that produced the result.
-void vm_diagnostics(VMResult *r, const char *src)
+// Print the value to stdout.
+// The src string must be the one that produced the value.
+void vm_value_print(Value *v, const char *src)
 {
-    assert(r && src);
-    if (r->ok) return;
+    switch (v->kind)
+    {
+        case VAL_VOID:
+            printf("<void>\n");
+            break;
 
-    printf("%s\n", src);
-    for (size_t i = 0; i < r->span_start; i++)
-        printf(" ");
-    printf("^ %s\n", r->msg);
+        case VAL_ERROR:
+            printf("%s\n", src);
+            for (size_t i = 0; i < v->as.error.pos; i++)
+                printf(" ");
+            printf("^ %s\n", v->as.error.msg);
+            break;
+
+        case VAL_NUMBER:
+            gmp_printf("%Qd\n", v->as.number);
+            break;
+
+        case VAL_BOOL:
+            printf("%s\n", v->as.boolean ? "true" : "false");
+            break;
+    }
 }
-
-// Free a VMResult.
-void vm_result_free(VMResult *r)
-{
-    if (!r) return;
-    if (r->msg) free(r->msg);
-    r->span_start = 0;
-    r->ok = 0;
-}
-

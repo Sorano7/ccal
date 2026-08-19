@@ -200,6 +200,13 @@ static bool vm_is_digit_list(const VM *v)
     return t.kind == TOK_LBRAC;
 }
 
+// Check if the current expression is considered singular.
+static bool vm_is_single_expr(const VM *v)
+{
+    return vm_is_alnum(v) || vm_is_digit_list(v)
+        || vm_token(v).kind == TOK_LPAREN;
+}
+
 // Find the next token of the given kind and return the offset from the current position.
 static size_t vm_find_next(VM *v, TokenKind tk)
 {
@@ -365,6 +372,9 @@ static bool eval_base(VM *v, Value *out)
         return value_errorf(out, t.pos, "Base too large");
     if (v->base <= 1)
         return value_errorf(out, t.pos, "Base must be at least 2");
+
+    if (!vm_is_single_expr(v))
+        return value_errorf(out, vm_token(v).pos, "Expected expression");
 
     bool ok = eval_expr(v, PREC_BASE, out);
     v->base = prev_base;

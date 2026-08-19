@@ -7,10 +7,7 @@
 const char *tk_to_str[] = {TOKENS(AS_STR)};
 
 #define NEXT_IS_THEN(src, i, c, tk) do { \
-    if ((src)[(i)+1] && (src)[i] == (c)) { \
-        i++; \
-        return (tk); \
-    } \
+    if ((src)[(i)+1] == (c)) return (tk); \
 } while (0)
 
 // Get the kind of token at the pointer.
@@ -58,7 +55,7 @@ static TokenKind token_kind_get(const char *src, size_t i)
 }
 
 // Initialize a token array or reset if is already allocated.
-static bool ta_init_or_reset(TokenArray *ta)
+static void ta_init_or_reset(TokenArray *ta)
 {
     assert(ta);
     ta->len = 0;
@@ -68,8 +65,7 @@ static bool ta_init_or_reset(TokenArray *ta)
         ta->cap = 128;
         ta->data = malloc(sizeof(Token) * ta->cap);
     }
-    if (!ta->data) return false;
-    return true;
+    assert(ta->data);
 }
 
 // Push a new token to the lexer.
@@ -115,7 +111,7 @@ static Token token_with_data(Token tok, const char *data, size_t len)
 // Tokenize the source.
 bool tokenize(TokenArray *ta, const char *src)
 {
-    if (!ta_init_or_reset(ta)) return false;
+    ta_init_or_reset(ta);
 
     size_t i = 0;
     while (src[i] != '\0')
@@ -125,6 +121,8 @@ bool tokenize(TokenArray *ta, const char *src)
         switch (kind)
         {
             case TOK_INVALID:
+                ta_init_or_reset(ta);
+                ta_push(ta, token_create(kind, i));
                 return false;
 
             case TOK_SPACE:
@@ -146,6 +144,14 @@ bool tokenize(TokenArray *ta, const char *src)
 
                 Token tok = token_create(kind, start);
                 ta_push(ta, token_with_data(tok, src+start, i-start));
+                break;
+
+            case TOK_EQ:
+            case TOK_NEQ:
+            case TOK_LEQ:
+            case TOK_GEQ:
+                ta_push(ta, token_create(kind, i));
+                i += 2;
                 break;
 
             default:

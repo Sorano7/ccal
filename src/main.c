@@ -4,14 +4,8 @@
 #include "vm.h"
 
 // Start REPL.
-void repl_start(void)
+void repl_start(VM *vm, mpq_t value)
 {
-    VM vm;
-    vm_init(&vm);
-
-    mpq_t value;
-    mpq_init(value);
-
     for (;;)
     {
         printf("> ");
@@ -34,7 +28,7 @@ void repl_start(void)
             continue;
         }
 
-        VMResult res = vm_evaluate(&vm, src, value);
+        VMResult res = vm_evaluate(vm, src, value);
 
         if (res.ok)
             gmp_printf("%Qd\n", value);
@@ -49,16 +43,39 @@ void repl_start(void)
 
 int main(int argc, char **argv)
 {
+    VM vm;
+    vm_init(&vm);
+
+    mpq_t value;
+    mpq_init(value);
+
     if (argc == 1)
     {
-        repl_start();
+        repl_start(&vm, value);
     }
-    else if (argc == 2 && strcmp(argv[1], "help") == 0)
+    else if (argc == 3 && strcmp(argv[1], "run") == 0)
+    {
+        VMResult res = vm_evaluate(&vm, argv[2], value);
+        if (res.ok)
+        {
+            gmp_printf("%Qd\n", value);
+            vm_result_free(&res);
+            return 0;
+        }
+        else
+        {
+            vm_diagnostics(&res, argv[2]);
+            vm_result_free(&res);
+            return 1;
+        }
+    }
+    else
     {
         printf("Usage:\n"
-            "    ccal help     show this help\n"
-            "    ccal          start REPL\n");
+            "    ccal help          show this help\n"
+            "    ccal               start interactive REPL\n"
+            "    ccal run <expr>    evaluate and print the result\n");
+        return 1;
     }
-
     return 0;
 }

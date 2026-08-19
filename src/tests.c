@@ -78,17 +78,6 @@ TEST(digit_list_integer_eval)
     FIXTURE_END();
 }
 
-TEST(digit_list_syntax_must_be_complete)
-{
-    FIXTURE_START();
-        EVAL_FAIL("[", &val);
-        EVAL_FAIL("[]", &val);
-        EVAL_FAIL("[,", &val);
-        EVAL_FAIL("[1, 2", &val);
-        EVAL_FAIL("[1, 2,]", &val);
-    FIXTURE_END();
-}
-
 TEST(decimal_eval)
 {
     FIXTURE_START();
@@ -100,6 +89,47 @@ TEST(decimal_eval)
 
         EVAL("1.1(6)", &val);
         NUMBER_EQ(&val, 7, 6);
+    FIXTURE_END();
+}
+
+
+/************************************
+ * Syntax Validation
+ ************************************/
+
+TEST(invalid_token_is_rejected)
+{
+    FIXTURE_START();
+        EVAL_FAIL("&", &val);
+        EVAL_FAIL("\\", &val);
+    FIXTURE_END();
+}
+
+TEST(nud_must_not_precede_nud)
+{
+    FIXTURE_START();
+        EVAL_FAIL("123 123", &val);
+        EVAL_FAIL("123 [1,2,3]", &val);
+        EVAL_FAIL("123 (-123)", &val);
+    FIXTURE_END();
+}
+
+TEST(infix_must_be_complete)
+{
+    FIXTURE_START();
+        EVAL_FAIL("12 + ", &val);
+        EVAL_FAIL("* 12", &val);
+    FIXTURE_END();
+}
+
+TEST(digit_list_syntax_must_be_complete)
+{
+    FIXTURE_START();
+        EVAL_FAIL("[", &val);
+        EVAL_FAIL("[]", &val);
+        EVAL_FAIL("[,", &val);
+        EVAL_FAIL("[1, 2", &val);
+        EVAL_FAIL("[1, 2,]", &val);
     FIXTURE_END();
 }
 
@@ -119,6 +149,14 @@ TEST(decimal_mixed_format_is_invalid)
     FIXTURE_START();
         EVAL_FAIL("12.[3,4]", &val);
         EVAL_FAIL("[1,2].34([5,6])", &val);
+    FIXTURE_END();
+}
+
+TEST(group_must_be_closed)
+{
+    FIXTURE_START();
+        EVAL_FAIL("1 + (", &val);
+        EVAL_FAIL("1 + (2", &val);
     FIXTURE_END();
 }
 

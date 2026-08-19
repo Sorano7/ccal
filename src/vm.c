@@ -552,6 +552,7 @@ static bool eval_expr(VM *v, int prec, Value *out)
         if (!eval_led(v, p, out))
             return false;
     }
+
     return true;
 }
 
@@ -567,7 +568,11 @@ bool vm_evaluate(VM *v, const char *src, Value *out)
         return value_errorf(out, ta.data[0].pos, "Invalid token");
     v->ta = &ta;
 
-    return eval_expr(v, PREC_PRIMARY, out);
+    bool ok = eval_expr(v, PREC_PRIMARY, out);
+    if (vm_token(v).kind != TOK_EOF)
+        return value_errorf(out, vm_token(v).pos, "Expected operator");
+
+    return ok;
 }
 
 // Print the value to stdout.

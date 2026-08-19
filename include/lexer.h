@@ -21,6 +21,7 @@ typedef enum
 
     TOK_DOT,
     TOK_COMMA,
+    TOK_HASH,
 
     TOK_LBRAC,
     TOK_RBRAC,

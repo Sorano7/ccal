@@ -8,6 +8,7 @@
 // Parser for parsing tokens into AST.
 typedef struct
 {
+    unsigned long base;
     const TokenArray *ta;
     size_t pos;
 } Parser;

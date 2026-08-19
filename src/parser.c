@@ -6,6 +6,7 @@
 #include <errno.h>
 
 #define BASE_DEFAULT 10
+#define BASE_MAX ULONG_MAX
 
 // Cast the token as an infix operator.
 static Operator token_as_infix_op(Token t)
@@ -51,6 +52,7 @@ static OpPrec token_get_prec(Token t)
 // Intiialize a parser with a reference to the lexer.
 void parser_init(Parser *p, const TokenArray *ta)
 {
+    p->base = BASE_DEFAULT;
     p->ta = ta;
     p->pos = 0;
 }
@@ -65,6 +67,12 @@ void parser_reset(Parser *p)
 static Token parser_get_token(const Parser *p)
 {
     return p->ta->data[p->pos];
+}
+
+static Token parser_peek(const Parser *p)
+{
+    size_t pos = p->pos+1 < p->ta->len ? p->pos+1 : p->ta->len-1;
+    return p->ta->data[pos];
 }
 
 // Advance the parser.
@@ -170,7 +178,7 @@ static bool token_to_ul(Token tok, unsigned long *out)
 }
 
 // Try parsing a number part and return any error, NULL if no error is encountered.
-static Expr *try_parse_number_part(Parser *p, Digits *ds, DigitFormat fmt, unsigned long base)
+static Expr *try_parse_number_part(Parser *p, Digits *ds, DigitFormat fmt)
 {
     Token tok = parser_get_token(p);
 
@@ -181,7 +189,7 @@ static Expr *try_parse_number_part(Parser *p, Digits *ds, DigitFormat fmt, unsig
             if (fmt != DIGIT_FMT_ALNUM)
                 return parser_error(p, "Expected digit list");
 
-            DigitError err = digits_from_alnum(ds, tok.data, tok.len, base);
+            DigitError err = digits_from_alnum(ds, tok.data, tok.len, p->base);
             ENSURE_DIGIT_OK(p, err);
             parser_advance(p);
             return NULL;
@@ -205,7 +213,7 @@ static Expr *try_parse_number_part(Parser *p, Digits *ds, DigitFormat fmt, unsig
                     return parser_error(p, "Expected numeric digit");
 
                 unsigned long val;
-                if (!token_to_ul(tok, &val) || val >= base)
+                if (!token_to_ul(tok, &val) || val >= p->base)
                     return parser_error(p, "Digit out of bounds");
                 parser_advance(p);
 
@@ -232,8 +240,6 @@ static Expr *try_parse_number_part(Parser *p, Digits *ds, DigitFormat fmt, unsig
 // Parse a number literal.
 static Expr *parse_number(Parser *p, DigitFormat fmt)
 {
-    unsigned long base = BASE_DEFAULT;
-
     Literal lit = {0};
 
     Digits ds_i = {0};
@@ -242,7 +248,7 @@ static Expr *parse_number(Parser *p, DigitFormat fmt)
 
     Expr *err = NULL;
 
-    if ((err = try_parse_number_part(p, &ds_i, fmt, base)))
+    if ((err = try_parse_number_part(p, &ds_i, fmt)))
         return err;
 
     lit.I = &ds_i;
@@ -256,7 +262,7 @@ static Expr *parse_number(Parser *p, DigitFormat fmt)
 
     if (!parser_expect(p, TOK_LPAREN))
     {
-        if ((err = try_parse_number_part(p, &ds_n, fmt, base)))
+        if ((err = try_parse_number_part(p, &ds_n, fmt)))
                 return err;
 
         lit.N = &ds_n;
@@ -265,7 +271,7 @@ static Expr *parse_number(Parser *p, DigitFormat fmt)
     if (parser_expect(p, TOK_LPAREN))
     {
         parser_advance(p);
-        if ((err = try_parse_number_part(p, &ds_r, fmt, base)))
+        if ((err = try_parse_number_part(p, &ds_r, fmt)))
             return err;
 
         if (!parser_expect(p, TOK_RPAREN))
@@ -275,7 +281,7 @@ static Expr *parse_number(Parser *p, DigitFormat fmt)
     }
 
 cleanup:
-    literal_to_mpq(&lit, base, value);
+    literal_to_mpq(&lit, p->base, value);
     Expr *e = expr_number(value);
 
     digits_free(&ds_i);
@@ -318,12 +324,43 @@ static Expr *parse_prefix(Parser *p)
     return e;
 }
 
+// Parse base prefix. Return error.
+static Expr *parse_base(Parser *p)
+{
+    Token tok = parser_get_token(p);
+
+    parser_advance(p);
+    parser_advance(p);
+
+    unsigned long prev_base = p->base;
+    unsigned long base;
+    if (!token_to_ul(tok, &base))
+        return parser_error(p, "Base too large");
+
+    if (base <= 1)
+        return parser_error(p, "Base must be at least 2");
+
+    p->base = base;
+
+    Expr *e = parse_expr(p, PREC_BASE);
+
+    p->base = prev_base;
+
+    return e;
+}
+
 // Parse an expression.
 Expr *parse_expr(Parser *p, int prec)
 {
     Expr *e = NULL;
 
     Token tok = parser_get_token(p);
+
+    if (parser_peek(p).kind == TOK_HASH)
+    {
+        e = parse_base(p);
+        goto led;
+    }
 
     switch (tok.kind)
     {
@@ -332,27 +369,27 @@ Expr *parse_expr(Parser *p, int prec)
 
         case TOK_DIGIT:
         case TOK_ALNUM:
-             e = parse_number(p, DIGIT_FMT_ALNUM);
-             break;
+            e = parse_number(p, DIGIT_FMT_ALNUM);
+            break;
 
         case TOK_LBRAC:
-             e = parse_number(p, DIGIT_FMT_LIST);
-             break;
+            e = parse_number(p, DIGIT_FMT_LIST);
+            break;
 
         case TOK_LPAREN:
-             e = parse_group(p);
-             break;
+            e = parse_group(p);
+            break;
 
         case TOK_MINUS:
-             e = parse_prefix(p);
-             break;
+            e = parse_prefix(p);
+            break;
 
         default:
-             return parser_error(p, "Expected expression");
+            return parser_error(p, "Expected expression");
     }
 
+led:
     int current_prec = parser_get_prec(p);
-
     while (current_prec != PREC_PRIMARY && current_prec > prec)
     {
         if (parser_is_eof(p)) break;

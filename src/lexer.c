@@ -21,6 +21,7 @@ static const char *token_kind_str[] = {
 
     [TOK_DOT]     = "DOT",
     [TOK_COMMA]   = "COMMA",
+    [TOK_HASH]    = "HASH",
 
     [TOK_LBRAC]   = "LBRAC",
     [TOK_RBRAC]   = "RBRAC",
@@ -40,6 +41,7 @@ static TokenKind token_kind_get(char c)
 
         case '.': return TOK_DOT;
         case ',': return TOK_COMMA;
+        case '#': return TOK_HASH;
 
         case '[': return TOK_LBRAC;
         case ']': return TOK_RBRAC;

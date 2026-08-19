@@ -22,6 +22,7 @@ typedef enum
     PREC_SUM,
     PREC_PRODUCT,
     PREC_PREFIX,
+    PREC_BASE,
 } OpPrec;
 
 // Kinds of an expression.

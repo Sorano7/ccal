@@ -33,6 +33,11 @@
     CUT_CHECK(mpq_cmp_ui((v)->as.number, (n), (d)) == 0); \
 } while (0)
 
+#define BOOL_EQ(v, b) do { \
+    CUT_MUST((v)->kind == VAL_BOOL); \
+    CUT_CHECK((v)->as.boolean == (b)); \
+} while (0)
+
 
 /************************************
  * Number Literal
@@ -257,5 +262,42 @@ TEST(infix_has_correct_binding_power)
         NUMBER_EQ(&val, 20, 1);
     FIXTURE_END();
 }
+
+
+/************************************
+ * Boolean
+ ************************************/
+
+TEST(comparison_operators_eval)
+{
+    FIXTURE_START();
+        EVAL("1 < 2", &val);
+        BOOL_EQ(&val, true);
+
+        EVAL("2 <= 2", &val);
+        BOOL_EQ(&val, true);
+
+        EVAL("1 > 2", &val);
+        BOOL_EQ(&val, false);
+
+        EVAL("2 >= 2", &val);
+        BOOL_EQ(&val, true);
+    FIXTURE_END();
+}
+
+TEST(equality_operators_eval)
+{
+    FIXTURE_START();
+        EVAL("1 == 2", &val);
+        BOOL_EQ(&val, false);
+
+        EVAL("1 + 1 == 2", &val);
+        BOOL_EQ(&val, true);
+
+        EVAL("(1 == 1) == (2 == 2)", &val);
+        BOOL_EQ(&val, true);
+    FIXTURE_END();
+}
+
 
 TEST_RUN()

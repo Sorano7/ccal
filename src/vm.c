@@ -518,6 +518,25 @@ static bool eval_number_infix(Value *l, Token op, Value *r, size_t r_pos)
     return true;
 }
 
+// Evaluate boolean infix operations.
+static bool eval_bool_infix(Value *l, Token op, Value *r)
+{
+    switch (op.kind)
+    {
+        case TOK_EQ:
+            value_bool(l, l->as.boolean == r->as.boolean);
+            break;
+
+        case TOK_NEQ:
+            value_bool(l, l->as.boolean != r->as.boolean);
+            break;
+
+        default:
+            return value_errorf(l, op.pos, "Unknown operator");
+    }
+    return true;
+}
+
 // Evaluate a left denotation expression.
 static bool eval_led(VM *v, int prec, Value *left)
 {
@@ -543,7 +562,7 @@ static bool eval_led(VM *v, int prec, Value *left)
         case VAL_VOID:    assert(!"void value reached eval_led");
         case VAL_ERROR:   return false;
         case VAL_NUMBER:  return eval_number_infix(left, t, &right, r_tok_pos);
-        case VAL_BOOL:    return value_errorf(left, t.pos, "bool is not implemented");
+        case VAL_BOOL:    return eval_bool_infix(left, t, &right);
     }
 
     vm_value_free(&right);

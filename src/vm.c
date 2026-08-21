@@ -597,11 +597,13 @@ bool vm_evaluate(VM *v, const char *src, Value *out)
         return value_errorf(out, ta.data[0].pos, "Invalid token");
     v->ta = &ta;
 
-    bool ok = eval_expr(v, PREC_PRIMARY, out);
+    if (!eval_expr(v, PREC_PRIMARY, out) || out->kind == VAL_ERROR)
+        return false;
+
     if (vm_token(v).kind != TOK_EOF)
         return value_errorf(out, vm_token(v).pos, "Expected operator");
 
-    return ok;
+    return true;
 }
 
 // Print the value to stdout.

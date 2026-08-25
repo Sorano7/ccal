@@ -1,4 +1,4 @@
-#define CUT_IMPLEMENTATION
+#define CUT_IMPL
 #include "cut.h"
 
 #include "vm.h"

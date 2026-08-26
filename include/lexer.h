@@ -2,6 +2,7 @@
 #define LEXER_H
 
 #include <stddef.h>
+#include "cut.h"
 
 #define TOKENS(X) \
     X(TOK_EOF,     "EOF") \
@@ -50,8 +51,7 @@ extern const char *tk_to_str[];
 // A token.
 typedef struct
 {
-    const char *data;
-    size_t len;
+    StringView value;
     size_t pos;
     TokenKind kind;
 } Token;
@@ -64,8 +64,6 @@ typedef struct
 } TokenArray;
 
 void ta_print(const TokenArray *ta);
-void ta_free(TokenArray *ta);
-
 bool tokenize(TokenArray *ta, const char *src);
 
 #endif

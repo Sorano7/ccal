@@ -2,20 +2,6 @@
 #include <stdlib.h>
 #include <assert.h>
 
-// Allocate the digit sequence.
-void digits_alloc(Digits *ds, size_t len)
-{
-    assert(ds);
-    ds->data = malloc(len * sizeof(unsigned long));
-    ds->len = len;
-}
-
-static void digits_free(Digits *ds)
-{
-    if (!ds) return;
-    if (ds->data) free(ds->data);
-}
-
 // Convert a char to its digit number.
 // Return ULONG_MAX if invalid.
 static unsigned long char_to_num(char c)
@@ -37,22 +23,18 @@ static unsigned long char_to_num(char c)
 void literal_init(Literal *lit)
 {
     if (!lit) return;
-    lit->I.len = 0;
-    lit->N.len = 0;
-    lit->R.len = 0;
-
-    lit->I.data = NULL;
-    lit->N.data = NULL;
-    lit->R.data = NULL;
+    da_init(&lit->I);
+    da_init(&lit->N);
+    da_init(&lit->R);
 }
 
 // Free a literal.
 void literal_free(Literal *lit)
 {
     if (!lit) return;
-    digits_free(&lit->I);
-    digits_free(&lit->N);
-    digits_free(&lit->R);
+    da_free(&lit->I);
+    da_free(&lit->N);
+    da_free(&lit->R);
 }
 
 static DigitResult digit_error(size_t pos, DRKind kind)
@@ -61,25 +43,23 @@ static DigitResult digit_error(size_t pos, DRKind kind)
 }
 
 // Create a sequnece of digits from an alphanumeric string.
-DigitResult digits_from_alnum(Digits *ds, const char *s, size_t len, unsigned long base)
+DigitResult digits_from_alnum(DigitArray *ds, StringView s, unsigned long base)
 {
-    digits_alloc(ds, len);
-
-    for (size_t i = 0; i < len; i++)
+    for (size_t i = 0; i < s.len; i++)
     {
-        unsigned long val = char_to_num(s[i]);
+        unsigned long val = char_to_num(s.data[i]);
         if (val == ULONG_MAX)
             return digit_error(i, DIGIT_INVALID);
         if (val >= base)
             return digit_error(i, DIGIT_OOB);
 
-        ds->data[i] = val;
+        da_append(ds, val);
     }
     return (DigitResult){.kind=DIGIT_OK};
 }
 
 // Converts a sequence of digits in the given base to an integer.
-static void digits_to_mpz(const Digits *ds, unsigned long base, mpz_t out)
+static void digits_to_mpz(const DigitArray *ds, unsigned long base, mpz_t out)
 {
     mpz_set_ui(out, 0);
     if (!ds) return;

@@ -161,7 +161,7 @@ void vm_init(VM *v)
 void vm_free(VM *v)
 {
     if (v->ta)
-        ta_free(v->ta);
+        da_free(v->ta);
     v->pos = 0;
     v->base = 0;
 }
@@ -207,21 +207,6 @@ static bool vm_is_single_expr(const VM *v)
         || vm_token(v).kind == TOK_LPAREN;
 }
 
-// Find the next token of the given kind and return the offset from the current position.
-static size_t vm_find_next(VM *v, TokenKind tk)
-{
-    size_t prev_pos = v->pos;
-    while (vm_token(v).kind != tk)
-    {
-        v->pos++;
-        if (vm_token(v).kind == TOK_EOF)
-            return SIZE_MAX;
-    }
-    size_t d = v->pos - prev_pos;
-    v->pos = prev_pos;
-    return d;
-}
-
 #define CONSUME_EXPECT(v, tk, err) do { \
     Token t = vm_token(v); \
     if (t.kind != tk) \
@@ -235,9 +220,7 @@ static bool eval_expr(VM *v, int prec, Value *out);
 // t must be TOK_DIGIT.
 static bool token_to_ul(Token t, unsigned long *out)
 {
-    char buffer[t.len+1];
-    memcpy(buffer, t.data, t.len);
-    buffer[t.len] = '\0';
+    SV_TO_CSTR(t.value, buffer);
 
     errno = 0;
 
@@ -250,13 +233,13 @@ static bool token_to_ul(Token t, unsigned long *out)
 }
 
 // Parse an alphanumeric number part.
-static bool parse_number_part_alnum(VM *v, Digits *ds, Value *err)
+static bool parse_number_part_alnum(VM *v, DigitArray *ds, Value *err)
 {
     Token t = vm_token(v);
     if (!vm_is_alnum(v))
         return value_errorf(err, t.pos, "Expected alphanumerics");
 
-    DigitResult res = digits_from_alnum(ds, t.data, t.len, v->base);
+    DigitResult res = digits_from_alnum(ds, t.value, v->base);
     switch (res.kind)
     {
         case DIGIT_INVALID:
@@ -271,19 +254,13 @@ static bool parse_number_part_alnum(VM *v, Digits *ds, Value *err)
     return true;
 }
 
-static bool parse_number_part_list(VM *v, Digits *ds, Value *err)
+static bool parse_number_part_list(VM *v, DigitArray *ds, Value *err)
 {
     Token t = vm_token(v);
     if (!vm_is_digit_list(v))
         return value_errorf(err, t.pos, "Expected digit list");
 
     CONSUME_EXPECT(v, TOK_LBRAC, err);
-    size_t i = 0;
-    size_t len = vm_find_next(v, TOK_RBRAC);
-    if (len == SIZE_MAX)
-        return value_errorf(err, vm_token(v).pos, "Expected ']");
-
-    digits_alloc(ds, len);
     for (;;)
     {
         t = vm_token(v);
@@ -295,11 +272,11 @@ static bool parse_number_part_list(VM *v, Digits *ds, Value *err)
             return value_errorf(err, t.pos, "Digit out of bounds");
         v->pos++;
 
-        ds->data[i++] = val;
+        da_append(ds, val);
+
         if (vm_token(v).kind == TOK_RBRAC) break;
         CONSUME_EXPECT(v, TOK_COMMA, err);
     }
-    ds->len = i;
     CONSUME_EXPECT(v, TOK_RBRAC, err);
 
     return true;
@@ -307,7 +284,7 @@ static bool parse_number_part_list(VM *v, Digits *ds, Value *err)
 
 // Parse a number part (I, N, or R) into a sequence of digits.
 // Ensure the number is in the same format as fmt.
-static bool parse_number_part(VM *v, Digits *ds, DigitFormat fmt, Value *err)
+static bool parse_number_part(VM *v, DigitArray *ds, DigitFormat fmt, Value *err)
 {
     switch (fmt)
     {

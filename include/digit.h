@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <gmp.h>
+#include "cut.h"
 
 typedef enum
 {
@@ -14,13 +15,14 @@ typedef struct
 {
     unsigned long *data;
     size_t len;
-} Digits;
+    size_t cap;
+} DigitArray;
 
 typedef struct
 {
-    Digits I;
-    Digits N;
-    Digits R;
+    DigitArray I;
+    DigitArray N;
+    DigitArray R;
 } Literal;
 
 typedef enum
@@ -36,9 +38,7 @@ typedef struct
     DRKind kind;
 } DigitResult;
 
-void digits_alloc(Digits *ds, size_t len);
-
-DigitResult digits_from_alnum(Digits *ds, const char *s, size_t len, unsigned long base);
+DigitResult digits_from_alnum(DigitArray *ds, StringView s, unsigned long base);
 
 void literal_init(Literal *lit);
 void literal_free(Literal *lit);

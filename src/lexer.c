@@ -54,64 +54,17 @@ static TokenKind token_kind_get(const char *src, size_t i)
     return TOK_INVALID;
 }
 
-// Initialize a token array or reset if is already allocated.
-static void ta_init_or_reset(TokenArray *ta)
-{
-    assert(ta);
-    ta->len = 0;
-
-    if (!ta->data) 
-    {
-        ta->cap = 128;
-        ta->data = malloc(sizeof(Token) * ta->cap);
-    }
-    assert(ta->data);
-}
-
-// Push a new token to the lexer.
-static bool ta_push(TokenArray *ta, Token tok)
-{
-    if (ta->len + 1 > ta->cap)
-    {
-        size_t new_cap = ta->cap * 2;
-        Token *new_data = realloc(ta->data, new_cap * sizeof(Token));
-        if (!new_data) return false;
-        ta->data = new_data;
-        ta->cap = new_cap;
-    }
-    ta->data[ta->len++] = tok;
-    return true;
-}
-
-// Free a token array.
-void ta_free(TokenArray *ta)
-{
-    if (!ta) return;
-    ta->cap = 0;
-    ta->len = 0;
-    if (ta->data)
-        free(ta->data);
-    ta->data = NULL;
-}
-
 // Create a token.
-static Token token_create(TokenKind kind, size_t pos)
+static Token token_create(TokenKind kind, StringView value, size_t pos)
 {
-    return (Token){.data=NULL, .len=0, .pos=pos, .kind=kind};
-}
-
-// Return a token with additional data.
-static Token token_with_data(Token tok, const char *data, size_t len)
-{
-    tok.data = data;
-    tok.len = len;
-    return tok;
+    return (Token){.value=value, .pos=pos, .kind=kind};
 }
 
 // Tokenize the source.
 bool tokenize(TokenArray *ta, const char *src)
 {
-    ta_init_or_reset(ta);
+    da_reset(ta);
+    if (!ta->data) da_init(ta);
 
     size_t i = 0;
     while (src[i] != '\0')
@@ -121,8 +74,8 @@ bool tokenize(TokenArray *ta, const char *src)
         switch (kind)
         {
             case TOK_INVALID:
-                ta_init_or_reset(ta);
-                ta_push(ta, token_create(kind, i));
+                da_reset(ta);
+                da_append(ta, token_create(kind, SV(""), i));
                 return false;
 
             case TOK_SPACE:
@@ -142,25 +95,25 @@ bool tokenize(TokenArray *ta, const char *src)
                     i++;
                 }
 
-                Token tok = token_create(kind, start);
-                ta_push(ta, token_with_data(tok, src+start, i-start));
+                StringView v = {.data=src+start, .len=i-start};
+                da_append(ta, token_create(kind, v, start));
                 break;
 
             case TOK_EQ:
             case TOK_NEQ:
             case TOK_LEQ:
             case TOK_GEQ:
-                ta_push(ta, token_create(kind, i));
+                da_append(ta, token_create(kind, SV(""), i));
                 i += 2;
                 break;
 
             default:
-                ta_push(ta, token_create(kind, i));
+                da_append(ta, token_create(kind, SV(""), i));
                 i++;
                 break;
         }
     }
 
-    ta_push(ta, token_create(TOK_EOF, i));
+    da_append(ta, token_create(TOK_EOF, SV(""), i));
     return true;
 }

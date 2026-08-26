@@ -3,6 +3,9 @@
 
 #include "vm.h"
 
+#define CUT_IMPL
+#include "cut.h"
+
 // Start REPL.
 void repl_start(VM *vm, Value *value)
 {

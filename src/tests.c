@@ -1,8 +1,8 @@
-#define CUT_IMPL
-#include "cut.h"
-
 #include "vm.h"
 #include <gmp.h>
+
+#define CUT_IMPL
+#include "cut.h"
 
 #define FIXTURE_START() \
     VM vm; vm_init(&vm); \

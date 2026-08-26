@@ -1,6 +1,3 @@
-#include <stdio.h>
-#include <string.h>
-
 #include "vm.h"
 
 #define CUT_IMPL
@@ -12,17 +9,17 @@ void repl_start(VM *vm, Value *value)
     for (;;)
     {
         printf("> ");
-        char src[1024];
-        if (!fgets(src, sizeof(src), stdin))
-            break;
+        String s;
+        str_reserve(&s, 1024);
 
-        src[strcspn(src, "\n")] = '\0';
+        str_readline(&s, stdin);
+        StringView src = sv_trim(SV(s));
 
-        if (strlen(src) == 0) continue;
+        if (src.len == 0) continue;
 
-        if (src[0] == ':')
+        if (sv_startswith(src, SV(":")))
         {
-            if (strcmp(src, ":q") == 0)
+            if (sv_equal(src, ":q"))
                 break;
             else
                 printf("Unknown command.\n");
@@ -42,14 +39,18 @@ int main(int argc, char **argv)
 
     Value value = {0};
 
+    StringView args[argc];
+    for (int i = 0; i < argc; i++)
+        args[i] = SV(argv[i]);
+
     if (argc == 1)
     {
         repl_start(&vm, &value);
     }
-    else if (argc == 3 && strcmp(argv[1], "run") == 0)
+    else if (argc == 3 && sv_equal(args[1], "run") == 0)
     {
-        bool ok = vm_evaluate(&vm, argv[2], &value);
-        vm_value_print(&value, argv[2]);
+        bool ok = vm_evaluate(&vm, args[2], &value);
+        vm_value_print(&value, args[2]);
         return ok ? 0 : 1;
     }
     else

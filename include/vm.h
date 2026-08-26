@@ -42,8 +42,8 @@ typedef struct
 void vm_init(VM *v);
 void vm_free(VM *v);
 
-bool vm_evaluate(VM *v, const char *src, Value *out);
-void vm_value_print(Value *v, const char *src);
+bool vm_evaluate(VM *v, StringView src, Value *out);
+void vm_value_print(Value *v, StringView src);
 void vm_value_free(Value *v);
 
 #endif

@@ -19,12 +19,12 @@
 } while (0)
 
 #define EVAL(src, v) do { \
-    if (!vm_evaluate(&vm, (src), (v))) \
+    if (!vm_evaluate(&vm, SV(src), (v))) \
         CUT_FATAL("%s", val.as.error.msg); \
 } while (0)
 
 #define EVAL_FAIL(src, v) do { \
-    bool ok = vm_evaluate(&vm, (src), (v)); \
+    bool ok = vm_evaluate(&vm, SV(src), (v)); \
     if (ok) CUT_ERROR(#src " did not fail"); \
 } while (0)
 

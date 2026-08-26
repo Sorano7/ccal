@@ -7,7 +7,7 @@
 #include <stdlib.h>
 
 /************************************************
- * Utils
+ * Dynamic Array
  ************************************************/
 
 // Default capacity for any dynamic array.
@@ -53,13 +53,17 @@
     } \
 } while (0)
 
-// Append an item to the dynamic array.
-#define da_append(da, item) do { \
+#define da_grow(da) do { \
     if ((da)->len >= (da)->cap) { \
         (da)->cap = (da)->cap == 0 ? DA_DEFAULT_CAP : (da)->cap * 2; \
         (da)->data = realloc((da)->data, (da)->cap * sizeof(*(da)->data)); \
         if (!(da)->data) abort(); \
     } \
+} while (0)
+
+// Append an item to the dynamic array.
+#define da_append(da, item) do { \
+    da_grow(da); \
     (da)->data[(da)->len++] = (item); \
 } while (0)
 
@@ -71,6 +75,10 @@
     } \
 } while (0)
 
+
+/************************************************
+ * Strings
+ ************************************************/
 
 // A readonly view of a string.
 typedef struct
@@ -100,7 +108,9 @@ StringView _sv_from_strp(const void *pp);
     String *:            _sv_from_str(&(s)), \
     const String *:      _sv_from_str(&(s)), \
     String **:           _sv_from_strp(&(s)), \
-    const String **:     _sv_from_strp(&(s)))
+    const String **:     _sv_from_strp(&(s)), \
+    StringView *:        (s), \
+    const StringView *:  (s))
 
 // Declares a char array named `id`.
 #define SV_TO_CSTR(sv, id) \
@@ -109,46 +119,96 @@ StringView _sv_from_strp(const void *pp);
     id[(sv).len] = '\0';
 
 // Returns if a and b are equal.
-bool sv_equal(StringView a, StringView b);
+bool _sv_equal(StringView a, StringView b);
+
+#define sv_equal(a, b) _sv_equal(SV(a), SV(b))
 
 #define SV_FMT "%.*s"
 #define SV_ARG(s) ((int)(s).len), ((s).data)
 
-// Append a string view to the string.
-#define string_append_view(s, value) do { \
-    da_appendn((s), (value).data, (value).len); \
+#define str_append_null(s) do { \
     (s)->data[(s)->len] = '\0'; \
 } while (0)
 
-// Append a C-string to the string.
-#define string_append_cstr(s, value) do { \
-    da_appendn((s), (value), strlen(value)); \
-    (s)->data[(s)->len] = '\0'; \
-} while (0)
+void str_append_view(String *s, StringView v);
+void str_append_str(String *s, String *v);
+void str_append_cstr(String *s, const char *v);
+
+#define str_append(s, v) _Generic((v), \
+    char *:       str_append_cstr, \
+    const char *: str_append_cstr, \
+    StringView:   str_append_view, \
+    String *:     str_append_str \
+)(s, v)
 
 // Append a formatted string to the string.
-void string_appendf(String *s, const char *fmt, ...);
+void str_appendf(String *s, const char *fmt, ...);
 
 // Append a variadic formatted string to the string.
-void string_appendvf(String *s, const char *fmt, va_list args);
+void str_appendvf(String *s, const char *fmt, va_list args);
 
-#define string_init(s) do { \
+// Initializes a string.
+#define str_init(s) do { \
     da_init(s); \
-    (s)->data[0] = '\0'; \
+    str_append_null(s); \
 } while (0)
 
-#define string_reserve(s, n) do { \
+// Initializes a string with a value
+#define str_init_with(s, v) do { \
+    da_init(s); \
+    str_append(s, v); \
+} while (0)
+
+// Initializes a string with a reserved capacity.
+#define str_reserve(s, n) do { \
     da_reserve((s), (n)); \
-    (s)->data[0] = '\0'; \
+    str_append_null(s); \
 } while (0)
 
-#define string_free(s) da_free(s)
+// Free a string.
+#define str_free(s) da_free(s)
 
-#define string_reset(s) do { \
+// Reset a string.
+#define str_reset(s) do { \
     da_reset(s); \
-    (s)->data[0] = '\0'; \
+    str_append_null(s); \
 } while (0)
 
+// Insert an element at index n.
+void str_insert(String *s, char v, size_t n);
+
+// Find the index of a character.
+size_t sv_find(StringView s, char v);
+
+// Shift a string view by n. Mutates input.
+StringView sv_shift(StringView *s, size_t n);
+
+// Shift a string view until the next instance of delim. Mutates input.
+StringView sv_split(StringView *s, char delim);
+
+// Trim whitespaces from the string view.
+StringView sv_trim(StringView s);
+
+typedef struct
+{
+    size_t from;
+    size_t to;
+} SVSLiceOpt;
+
+// Return a slice of the string view.
+StringView sv_slice_opt(StringView s, SVSLiceOpt opt);
+
+#define sv_slice(s, ...) sv_slice_opt((s), (SVSLiceOpt){ \
+        .from=0, .to=SIZE_MAX, __VA_ARGS__})
+
+// Read a full line from the file stream.
+void str_readline(String *s, FILE *stream);
+
+// Check if the string view starts with a prefix.
+bool sv_startswith(StringView s, StringView prefix);
+
+// Check if the string view ends with a suffix.
+bool sv_endswith(StringView s, StringView suffix);
 
 /************************************************
  * Logging
@@ -489,7 +549,7 @@ StringView _sv_from_strp(const void *pp)
 }
 
 // Returns if a and b are equal.
-bool sv_equal(StringView a, StringView b)
+bool _sv_equal(StringView a, StringView b)
 {
     if (a.len != b.len) return false;
 
@@ -499,17 +559,34 @@ bool sv_equal(StringView a, StringView b)
     return true;
 }
 
+void str_append_view(String *s, StringView v)
+{
+    da_appendn(s, v.data, v.len);
+    str_append_null(s);
+}
+
+void str_append_str(String *s, String *v)
+{
+    da_appendn(s, v->data, v->len);
+    str_append_null(s);
+}
+void str_append_cstr(String *s, const char *v)
+{
+    da_appendn(s, v, strlen(v));
+    str_append_null(s);
+}
+
 // Append a formatted string to the string.
-void string_appendf(String *s, const char *fmt, ...)
+void str_appendf(String *s, const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
-    string_appendvf(s, fmt, args);
+    str_appendvf(s, fmt, args);
     va_end(args);
 }
 
 // Append a variadic formatted string to the string.
-void string_appendvf(String *s, const char *fmt, va_list args)
+void str_appendvf(String *s, const char *fmt, va_list args)
 {
     va_list copy;
     va_copy(copy, args);
@@ -519,17 +596,142 @@ void string_appendvf(String *s, const char *fmt, va_list args)
     if (size < 0) return;
     char buffer[size+1];
     vsnprintf(buffer, (size_t)size+1, fmt, args);
-    string_append_cstr(s, buffer);
+    str_append_cstr(s, buffer);
+}
+
+// Insert an element at index n.
+void str_insert(String *s, char v, size_t n)
+{
+    assert(n <= s->len);
+    da_grow(s);
+    for (size_t i = s->len; i > n; i--)
+        s->data[i] = s->data[i-1];
+
+    s->data[n] = v;
+    s->len++;
+}
+
+// Find the index of a character.
+size_t sv_find(StringView s, char v)
+{
+    size_t out = SIZE_MAX;
+    for (size_t i = 0; i < s.len; i++)
+    {
+        if (s.data[i] == v)
+        {
+            out = i;
+            break;
+        }
+    }
+    return out;
+}
+
+// Shift a string view by n. Mutates input.
+StringView sv_shift(StringView *s, size_t n)
+{
+    StringView out = {s->data, n};
+    s->data += n;
+    s->len -= n;
+    return out;
+}
+
+// Shift a string view until the next instance of delim. Mutates input.
+StringView sv_split(StringView *s, char delim)
+{
+    StringView out = *s;
+
+    size_t n = sv_find(*s, delim);
+    if (n == SIZE_MAX) 
+    {
+        s->len = 0;
+        return out;
+    }
+
+    sv_shift(s, n+1);
+    out.len = n;
+    return out;
+}
+
+// Trim whitespaces from the string view.
+StringView sv_trim(StringView s)
+{
+    for (;;)
+    {
+        if (isspace(*s.data))
+        {
+            s.data++;
+            s.len--;
+            continue;
+        }
+        break;
+    }
+
+    for (;;)
+    {
+        if (isspace(s.data[s.len-1]))
+        {
+            s.len--;
+            continue;
+        }
+        break;
+    }
+    return s;
+}
+
+// Return a slice of the string view.
+StringView sv_slice_opt(StringView s, SVSLiceOpt opt)
+{
+    if (opt.to == SIZE_MAX) opt.to = s.len;
+    assert(opt.to <= s.len);
+    assert(opt.from < opt.to);
+
+    s.data += opt.from;
+    s.len = opt.to - opt.from;
+    return s;
+}
+
+// Read a full line from the file stream.
+void str_readline(String *s, FILE *stream)
+{
+    char chunk[256];
+    for (;;)
+    {
+        if (!fgets(chunk, sizeof(chunk), stream))
+            break;
+
+        str_append(s, chunk);
+        StringView sv = {chunk, strlen(chunk)};
+        if (sv_find(sv, '\n') != SIZE_MAX) break;
+        if (sv.len < sizeof(chunk)-1) break;
+    }
+}
+
+// Check if the string view starts with a prefix.
+bool sv_startswith(StringView s, StringView prefix)
+{
+    if (prefix.len == 0) return true;
+    if (s.len < prefix.len) return false;
+    s = sv_slice(s, .to=prefix.len);
+    return sv_equal(s, prefix);
+}
+
+// Check if the string view ends with a suffix.
+bool sv_endswith(StringView s, StringView suffix)
+{
+    if (suffix.len == 0) return true;
+    if (s.len < suffix.len) return false;
+    s = sv_slice(s, .from=s.len-suffix.len);
+    return sv_equal(s, suffix);
 }
 
 // Format the string list into a whitespace-separated string.
-static void string_list_format(SVList *sl, String *sb, StringView prefix)
+static void str_list_format(SVList *sl, String *sb, StringView prefix)
 {
     da_for(sl, i)
     {
-        string_appendf(sb, SV_FMT, SV_ARG(prefix));
+        str_appendf(sb, SV_FMT, SV_ARG(prefix));
         StringView sv = sl->data[i];
-        string_appendf(sb, SV_FMT" ", SV_ARG(sv));
+        str_appendf(sb, SV_FMT" ", SV_ARG(sv));
     }
 }
 
@@ -580,37 +782,37 @@ static MkdirResult mkdir_if_not_exist(StringView path)
 // Append the name of the executable to the string builder.
 static void append_exe_name(String *sb, StringView base)
 {
-    string_append_view(sb, base);
+    str_append_view(sb, base);
 
 #ifdef _WIN32
-    string_appendf(sb, ".exe");
+    str_appendf(sb, ".exe");
 #endif
 }
 
 // Generate the build command for a unit.
 static void generate_build_command(CutUnit *unit, String *sb)
 {
-    string_appendf(sb, SV_FMT" ", SV_ARG(cut_builder.cc));
+    str_appendf(sb, SV_FMT" ", SV_ARG(cut_builder.cc));
 
-    string_list_format(&unit->sources, sb, SV(""));
-    string_list_format(&unit->includes, sb, SV("-I"));
-    string_list_format(&unit->flags, sb, SV(""));
-    string_list_format(&unit->defines, sb, SV("-D"));
-    string_list_format(&unit->libs, sb, SV("-l"));
+    str_list_format(&unit->sources, sb, SV(""));
+    str_list_format(&unit->includes, sb, SV("-I"));
+    str_list_format(&unit->flags, sb, SV(""));
+    str_list_format(&unit->defines, sb, SV("-D"));
+    str_list_format(&unit->libs, sb, SV("-l"));
 
-    string_appendf(sb, "-o "SV_FMT"/", SV_ARG(cut_builder.build_dir));
-    string_appendf(sb, SV_FMT" ", SV_ARG(unit->name));
+    str_appendf(sb, "-o "SV_FMT"/", SV_ARG(cut_builder.build_dir));
+    str_appendf(sb, SV_FMT" ", SV_ARG(unit->name));
 }
 
 // Generate the command to run an executable. Contains a trailing whitespace.
 static void generate_run_command(StringView name, StringView parent, String *sb)
 {
-    string_appendf(sb, "."PATH_SEP);
+    str_appendf(sb, "."PATH_SEP);
     if (parent.len > 0)
-        string_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.build_dir));
+        str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.build_dir));
 
     append_exe_name(sb, name);
-    string_appendf(sb, " ");
+    str_appendf(sb, " ");
 }
 
 // Run a external command.
@@ -628,23 +830,23 @@ static void exec_command(StringView cmd)
 static void old_script_exe_name(String *sb)
 {
     append_exe_name(sb, cut_builder.script_name);
-    string_appendf(sb, ".old");
+    str_appendf(sb, ".old");
 }
 
 // Remove a path.
 static void remove_path(StringView path)
 {
     String cmd;
-    string_init(&cmd);
+    str_init(&cmd);
 
 #ifdef _WIN32
-    string_appendf(&cmd, "del /q /s ");
+    str_appendf(&cmd, "del /q /s ");
 #else
-    string_appendf(&cmd, "rm -rf ");
+    str_appendf(&cmd, "rm -rf ");
 #endif
-    string_appendf(&cmd, "\""SV_FMT"\"", SV_ARG(path));
+    str_appendf(&cmd, "\""SV_FMT"\"", SV_ARG(path));
     exec_command(SV(cmd));
-    string_free(&cmd);
+    str_free(&cmd);
 }
 
 /************************************************
@@ -679,9 +881,9 @@ static void log_list_append(CutLogList *logs, CutLog log, const char *fmt, va_li
     assert(logs);
 
     log.message = malloc(sizeof(String));
-    string_init(log.message);
+    str_init(log.message);
     assert(log.message);
-    string_appendvf(log.message, fmt, args);
+    str_appendvf(log.message, fmt, args);
 
     da_append(logs, log);
 }
@@ -928,7 +1130,7 @@ static bool should_rebuild(StringView file, StringView exe_name)
 {
     time_t mtime_file, mtime_exe;
     String exe;
-    string_init(&exe);
+    str_init(&exe);
     append_exe_name(&exe, exe_name);
 
     if (get_mtime(file, &mtime_file) != 0)
@@ -944,11 +1146,11 @@ static bool should_rebuild(StringView file, StringView exe_name)
 static void cut_rebuild(size_t argc, StringView *argv)
 {
     String sb;
-    string_init(&sb);
+    str_init(&sb);
     append_exe_name(&sb, cut_builder.script_name);
 
     String new_path;
-    string_init(&new_path);
+    str_init(&new_path);
     old_script_exe_name(&new_path);
 
     DEV_INFO("Renaming '"SV_FMT"' to '"SV_FMT"'",
@@ -963,19 +1165,19 @@ static void cut_rebuild(size_t argc, StringView *argv)
     if (!ok)
         DEV_FATAL("Failed to rename '"SV_FMT"'", SV_ARG(sb));
 
-    string_free(&new_path);
+    str_free(&new_path);
 
-    string_reset(&sb);
+    str_reset(&sb);
 
-    string_appendf(&sb, SV_FMT" ",    SV_ARG(cut_builder.cc));
-    string_appendf(&sb, SV_FMT" ",    SV_ARG(cut_builder.file));
-    string_appendf(&sb, "-o "SV_FMT,  SV_ARG(cut_builder.script_name));
+    str_appendf(&sb, SV_FMT" ",    SV_ARG(cut_builder.cc));
+    str_appendf(&sb, SV_FMT" ",    SV_ARG(cut_builder.file));
+    str_appendf(&sb, "-o "SV_FMT,  SV_ARG(cut_builder.script_name));
     exec_command(SV(sb));
 
-    string_reset(&sb);
+    str_reset(&sb);
     generate_run_command(cut_builder.script_name, SV(""), &sb);
     for (size_t i = 1; i < argc; i++)
-        string_appendf(&sb, SV_FMT" ", SV_ARG(argv[i]));
+        str_appendf(&sb, SV_FMT" ", SV_ARG(argv[i]));
 
     exec_command(SV(sb));
 
@@ -1049,7 +1251,7 @@ static CutUnit *cut_build_find_unit(StringView name)
 int cut_build_run(int argc, char **argv)
 {
     String cmd;
-    string_init(&cmd);
+    str_init(&cmd);
 
     StringView args[argc];
     for (int i = 0; i < argc; i++)
@@ -1058,18 +1260,18 @@ int cut_build_run(int argc, char **argv)
     if (should_rebuild(cut_builder.file, cut_builder.script_name))
         cut_rebuild(argc, args);
 
-    if (argc == 2 && sv_equal(args[1], SV("clean")))
+    if (argc == 2 && sv_equal(args[1], "clean"))
     {
-        string_appendf(&cmd, SV_FMT PATH_SEP "*", SV_ARG(cut_builder.build_dir));
+        str_appendf(&cmd, SV_FMT PATH_SEP "*", SV_ARG(cut_builder.build_dir));
         remove_path(SV(cmd));
 
-        string_reset(&cmd);
+        str_reset(&cmd);
         old_script_exe_name(&cmd);
         remove_path(SV(cmd));
         return 0;
     }
 
-    if (argc >= 3 && sv_equal(args[1], SV("rebuild")))
+    if (argc >= 3 && sv_equal(args[1], "rebuild"))
     {
         cut_rebuild(argc-1, args+1);
         return 0;
@@ -1077,7 +1279,7 @@ int cut_build_run(int argc, char **argv)
 
     if (argc >= 3)
     {
-        if (sv_equal(args[1], SV("build")) || sv_equal(args[1], SV("run")))
+        if (sv_equal(args[1], "build") || sv_equal(args[1], "run"))
         {
             CutUnit *unit = NULL;
             unit = cut_build_find_unit(args[2]);
@@ -1087,9 +1289,9 @@ int cut_build_run(int argc, char **argv)
             generate_build_command(unit, &cmd);
             exec_command(SV(cmd));
 
-            if (sv_equal(args[1], SV("run")))
+            if (sv_equal(args[1], "run"))
             {
-                string_reset(&cmd);
+                str_reset(&cmd);
                 generate_run_command(unit->name, cut_builder.build_dir, &cmd);
                 exec_command(SV(cmd));
             }

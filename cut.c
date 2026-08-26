@@ -8,7 +8,7 @@ void shared_config(CutUnit *u)
     cut_unit_sources(u, "src/vm.c");
 
     cut_unit_includes(u, "include");
-    cut_unit_flags(u, "-Wall", "-Wextra");
+    cut_unit_flags(u, "-Wall", "-Wextra", "-Wno-override-init");
     cut_unit_libs(u, "gmp");
 }
 

@@ -7,17 +7,17 @@
 const char *tk_to_str[] = {TOKENS(AS_STR)};
 
 #define NEXT_IS_THEN(src, i, c, tk) do { \
-    if ((src)[(i)+1] == (c)) return (tk); \
+    if ((src).data[(i)+1] == (c)) return (tk); \
 } while (0)
 
 // Get the kind of token at the pointer.
-static TokenKind token_kind_get(const char *src, size_t i)
+static TokenKind token_kind_get(StringView src, size_t i)
 {
-    if (isdigit(src[i])) return TOK_DIGIT;
-    if (isalpha(src[i])) return TOK_ALPHA;
-    if (isspace(src[i])) return TOK_SPACE;
+    if (isdigit(src.data[i])) return TOK_DIGIT;
+    if (isalpha(src.data[i])) return TOK_ALPHA;
+    if (isspace(src.data[i])) return TOK_SPACE;
 
-    switch (src[i])
+    switch (src.data[i])
     {
         case '+': return TOK_PLUS;
         case '-': return TOK_MINUS;
@@ -61,13 +61,13 @@ static Token token_create(TokenKind kind, StringView value, size_t pos)
 }
 
 // Tokenize the source.
-bool tokenize(TokenArray *ta, const char *src)
+bool tokenize(TokenArray *ta, StringView src)
 {
     da_reset(ta);
     if (!ta->data) da_init(ta);
 
     size_t i = 0;
-    while (src[i] != '\0')
+    while (i < src.len)
     {
         TokenKind kind = token_kind_get(src, i);
 
@@ -95,7 +95,7 @@ bool tokenize(TokenArray *ta, const char *src)
                     i++;
                 }
 
-                StringView v = {.data=src+start, .len=i-start};
+                StringView v = sv_slice(src, .from=start, .to=i);
                 da_append(ta, token_create(kind, v, start));
                 break;
 

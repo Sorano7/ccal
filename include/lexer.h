@@ -64,6 +64,6 @@ typedef struct
 } TokenArray;
 
 void ta_print(const TokenArray *ta);
-bool tokenize(TokenArray *ta, const char *src);
+bool tokenize(TokenArray *ta, StringView src);
 
 #endif

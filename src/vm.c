@@ -563,7 +563,7 @@ static bool eval_expr(VM *v, int prec, Value *out)
 }
 
 // Evaluate a source expression. out value will be reset but not freed before doing so.
-bool vm_evaluate(VM *v, const char *src, Value *out)
+bool vm_evaluate(VM *v, StringView src, Value *out)
 {
     assert(v && out);
     v->pos = 0;
@@ -585,7 +585,7 @@ bool vm_evaluate(VM *v, const char *src, Value *out)
 
 // Print the value to stdout.
 // The src string must be the one that produced the value.
-void vm_value_print(Value *v, const char *src)
+void vm_value_print(Value *v, StringView src)
 {
     switch (v->kind)
     {
@@ -594,7 +594,7 @@ void vm_value_print(Value *v, const char *src)
             break;
 
         case VAL_ERROR:
-            printf("%s\n", src);
+            printf(SV_FMT"\n", SV_ARG(src));
             for (size_t i = 0; i < v->as.error.pos; i++)
                 printf(" ");
             printf("^ %s\n", v->as.error.msg);

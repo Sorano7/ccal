@@ -9,8 +9,25 @@ Building from source:
 cc cut.c -o cut && ./cut build ccal
 ```
 
-Run `ccal` to start the REPL, `ccal run <expr>` to evaluate an expression.
+## Usage
 
+```sh
+ccal help                --  show help
+ccal <opts>              --  start REPL
+ccal run <expr> <opts>   --  run oneshot
+```
+
+Options include:
+
+```sh
+-d|--decimal
+-r|--rational
+-o|--obase <n>
+-i|--ibase <n>
+-t|--truncate <n>
+```
+
+Similar commands are available in REPL, prefixed with `:`.
 
 ## Syntax
 

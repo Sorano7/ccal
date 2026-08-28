@@ -5,10 +5,14 @@
 #include "cut.h"
 
 #define FIXTURE_START() \
+    String sb; str_init(&sb); \
+    RenderCtx ctx = {.num_form=NUMBER_RATIONAL,.src=SV("")}; \
+    (void)ctx; \
     VM vm; vm_init(&vm); \
-    Value val = {0}; \
+    Value val = {0};
 
 #define FIXTURE_END() \
+    str_free(&sb); \
     vm_value_free(&val);
 
 #define GMP_DEBUG(fmt, ...) do { \
@@ -21,6 +25,13 @@
 #define EVAL(src, v) do { \
     if (!vm_evaluate(&vm, SV(src), (v))) \
         CUT_FATAL("%s", val.as.error.msg); \
+} while (0)
+
+#define EVAL_RENDER(s, v) do { \
+    str_reset(&sb); \
+    EVAL((s), (v)); \
+    ctx.src = SV(s); \
+    vm_value_render(&val, &sb, &ctx); \
 } while (0)
 
 #define EVAL_FAIL(src, v) do { \
@@ -296,6 +307,60 @@ TEST(equality_operators_eval)
 
         EVAL("(1 == 1) == (2 == 2)", &val);
         BOOL_EQ(&val, true);
+    FIXTURE_END();
+}
+
+
+/************************************
+ * Value Rendering
+ ************************************/
+
+TEST(boolean_render_correct)
+{
+    FIXTURE_START();
+        EVAL_RENDER("999 * 0.5 < 666 * 0.9", &val);
+        sv_equal(sb, "true");
+
+        EVAL_RENDER("999 * 0.5 > 666 * 0.9", &val);
+        sv_equal(sb, "false");
+    FIXTURE_END();
+}
+
+TEST(integer_render_correct)
+{
+    FIXTURE_START();
+        EVAL_RENDER("123", &val);
+        sv_equal(sb, "123");
+
+        TODO("change output base");
+        EVAL_RENDER("16#FF", &val);
+        sv_equal(sb, "255");
+    FIXTURE_END();
+}
+
+TEST(rational_render_correct)
+{
+    FIXTURE_START();
+        EVAL_RENDER("0.3", &val);
+        sv_equal(sb, "3/10");
+
+        EVAL_RENDER("20 / 30", &val);
+        sv_equal(sb, "2/3");
+    FIXTURE_END();
+}
+
+TEST(decimal_render_correct)
+{
+    FIXTURE_START();
+        ctx.num_form = NUMBER_DECIMAL;
+        EVAL_RENDER("0.3", &val);
+        sv_equal(sb, "0.3");
+
+        EVAL_RENDER("1/3", &val);
+        sv_equal(sb, "0.(3)");
+
+        EVAL_RENDER("5/6", &val);
+        sv_equal(sb, "0.8(3)");
     FIXTURE_END();
 }
 

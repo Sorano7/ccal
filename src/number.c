@@ -113,3 +113,115 @@ void literal_to_mpq(Literal *lit, unsigned long base, mpq_t out)
 
     mpz_clears(i_val, n_val, r_val, b_n, b_r_1, num, den, tmp, NULL);
 }
+
+typedef struct
+{
+    mpz_t rem;
+    size_t pos;
+} Rem;
+
+typedef struct
+{
+    Rem *data;
+    size_t cap;
+    size_t len;
+} RemList;
+
+// Render a rational as a decimal string truncated up to max_digits.
+// Assumes base up to 62.
+void render_decimal(String *sb, const mpq_t n, int base, size_t max_digits)
+{
+    if (mpq_sgn(n) < 0)
+        str_append(sb, "-");
+
+    mpz_t num, den, intpart, rem, mul, digit;
+    mpz_inits(num, den, intpart, rem, mul, digit, NULL);
+
+    mpz_abs(num, mpq_numref(n));
+    mpz_set(den, mpq_denref(n));
+
+
+    mpz_fdiv_qr(intpart, rem, num, den);
+    {
+        char *s = mpz_get_str(NULL, base, intpart);
+        str_append(sb, s);
+        free(s);
+    }
+
+    if (mpz_sgn(rem) != 0)
+    {
+        str_append(sb, ".");
+
+        String frac;
+        str_init(&frac);
+
+        RemList seen;
+        da_init(&seen);
+
+        size_t pos = 0;
+        bool truncated = false;
+        size_t repeat_start = SIZE_MAX;
+
+        // Long division
+        for (;;)
+        {
+            if (mpz_sgn(rem) == 0) break;
+            if (max_digits > 0 && pos >= max_digits)
+            {
+                truncated = true;
+                break;
+            }
+
+            // Search whether remainder is seen
+            size_t found = SIZE_MAX;
+            DA_FOR(&seen, i)
+            {
+                Rem r = da_at(&seen, i);
+                if (mpz_cmp(r.rem, rem) == 0)
+                {
+                    found = r.pos;
+                    break;
+                }
+            }
+            if (found != SIZE_MAX)
+            {
+                repeat_start = found;
+                break;
+            }
+
+            // New remainder
+            Rem r;
+            mpz_init(r.rem);
+            mpz_set(r.rem, rem);
+            r.pos = pos;
+            da_append(&seen, r);
+
+            mpz_mul_ui(mul, rem, base);
+            mpz_fdiv_qr(digit, rem, mul, den);
+            {
+                char *s = mpz_get_str(NULL, base, digit);
+                str_append(&frac, s);
+                free(s);
+            }
+
+            pos++;
+        }
+
+        DA_FOR(&seen, i) mpz_clear(da_at(&seen, i).rem);
+        da_free(&seen);
+
+        if (repeat_start != SIZE_MAX)
+        {
+            str_appendf(sb, "%.*s(%s)", 
+                    (int)repeat_start, frac.data, 
+                    frac.data+repeat_start);
+        }
+        else
+        {
+            str_append(sb, &frac);
+            if (truncated) str_append(sb, "...");
+        }
+    }
+
+    mpz_clears(num, den, intpart, rem, mul, digit, NULL);
+}

@@ -583,29 +583,47 @@ bool vm_evaluate(VM *v, StringView src, Value *out)
     return true;
 }
 
-// Print the value to stdout.
-// The src string must be the one that produced the value.
-void vm_value_print(Value *v, StringView src)
+// Render a value to the string builder.
+// The render may contain newlines but will not have a final newline.
+void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
 {
     switch (v->kind)
     {
         case VAL_VOID:
-            printf("<void>\n");
+            str_append(sb, "<void>");
             break;
 
         case VAL_ERROR:
-            printf(SV_FMT"\n", SV_ARG(src));
+            str_appendf(sb, SV_FMT"\n", SV_ARG(ctx->src));
             for (size_t i = 0; i < v->as.error.pos; i++)
-                printf(" ");
-            printf("^ %s\n", v->as.error.msg);
+                str_append(sb, " ");
+
+            str_appendf(sb, "^ %s", v->as.error.msg);
             break;
 
         case VAL_NUMBER:
-            gmp_printf("%Qd\n", v->as.number);
+            if (ctx->base >= 62)
+            {
+                str_append(sb, "Output base too large");
+                break;
+            }
+
+            switch (ctx->num_form)
+            {
+                case NUMBER_DECIMAL:
+                    render_decimal(sb, v->as.number, ctx->base, ctx->max_digits);
+                    break;
+
+                case NUMBER_RATIONAL:
+                    char *s = mpq_get_str(NULL, ctx->base, v->as.number);
+                    str_append(sb, s);
+                    free(s);
+                    break;
+            }
             break;
 
         case VAL_BOOL:
-            printf("%s\n", v->as.boolean ? "true" : "false");
+            str_appendf(sb, "%s", v->as.boolean ? "true" : "false");
             break;
     }
 }

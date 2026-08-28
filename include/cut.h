@@ -36,20 +36,23 @@
     (da)->len = 0; \
 } while (0)
 
-#define da_for(da, i) for (size_t i = 0; i < (da)->len; i++)
+#define da_at(da, i)   (da)->data[(i)]
+#define da_last(da, i) (da)->data[(da)->len-1]
+
+#define DA_FOR(da, i) for (size_t i = 0; i < (da)->len; i++)
 
 // Map a function accepting and returning type to each item in the dynamic array.
 #define da_map(da, type, f) do { \
-    da_for((da), i) { \
-        type item = (da)->data[i]; \
-        (da)->data[i] = (f)(item); \
+    DA_FOR((da), i) { \
+        type item = da_at((da), i); \
+        da_at((da), i) = (f)(item); \
     } \
 } while (0)
 
 // Map a function accepting pointer to type to each item in the dynamic array.
 #define da_map_mut(da, type, f) do { \
-    da_for((da), i) { \
-        (f)((type *)(&(da)->data[i])); \
+    DA_FOR((da), i) { \
+        (f)((type *)(&(da_at((da), i)))); \
     } \
 } while (0)
 
@@ -605,9 +608,9 @@ void str_insert(String *s, char v, size_t n)
     assert(n <= s->len);
     da_grow(s);
     for (size_t i = s->len; i > n; i--)
-        s->data[i] = s->data[i-1];
+        da_at(s, i) = da_at(s, i-1);
 
-    s->data[n] = v;
+    da_at(s, n) = v;
     s->len++;
 }
 
@@ -727,11 +730,10 @@ bool sv_endswith(StringView s, StringView suffix)
 // Format the string list into a whitespace-separated string.
 static void str_list_format(SVList *sl, String *sb, StringView prefix)
 {
-    da_for(sl, i)
+    DA_FOR(sl, i)
     {
         str_appendf(sb, SV_FMT, SV_ARG(prefix));
-        StringView sv = sl->data[i];
-        str_appendf(sb, SV_FMT" ", SV_ARG(sv));
+        str_appendf(sb, SV_FMT" ", SV_ARG(da_at(sl, i)));
     }
 }
 
@@ -798,6 +800,7 @@ static void generate_build_command(CutUnit *unit, String *sb)
     str_list_format(&unit->includes, sb, SV("-I"));
     str_list_format(&unit->flags, sb, SV(""));
     str_list_format(&unit->defines, sb, SV("-D"));
+    str_list_format(&unit->lib_dirs, sb, SV("-L"));
     str_list_format(&unit->libs, sb, SV("-l"));
 
     str_appendf(sb, "-o "SV_FMT"/", SV_ARG(cut_builder.build_dir));
@@ -914,7 +917,7 @@ static void log_list_print(CutLogList *logs, FILE *fdout, const char *prefix)
 
     for (size_t ei = 0; ei < logs->len; ei++)
     {
-        CutLog log = logs->data[ei];
+        CutLog log = da_at(logs, ei);
 
         fprintf(fdout, "%s", prefix);
 
@@ -1014,9 +1017,9 @@ static void test_case_info_print(CutTestCase *test, FILE *fdout, bool ansi)
 static bool test_case_status_print(CutLogList *logs, FILE* fdout, bool ansi)
 {
     size_t failure_count = 0;
-    da_for(logs, i)
+    DA_FOR(logs, i)
     {
-        CutLog log = logs->data[i];
+        CutLog log = da_at(logs, i);
         if (log.level == CUT_LOG_ERROR || log.level == CUT_LOG_FATAL)
             failure_count++;
     }

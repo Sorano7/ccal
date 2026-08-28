@@ -213,6 +213,20 @@ bool sv_startswith(StringView s, StringView prefix);
 // Check if the string view ends with a suffix.
 bool sv_endswith(StringView s, StringView suffix);
 
+// Convert a string view to int.
+bool sv_to_int(StringView s, int *out);
+
+// A dynamic array of string views.
+// Assuming static lifetime for the data.
+typedef struct
+{
+    StringView *data;
+    size_t len;
+    size_t cap;
+} SVList;
+
+void svlist_join(SVList *sv, String *sb, StringView delim);
+
 /************************************************
  * Logging
  ************************************************/
@@ -386,15 +400,6 @@ void cut_test_run_opt(TestRunOpt opt);
  * Build
  ************************************************/
 
-// A dynamic array of string views.
-// Assuming static lifetime for the data.
-typedef struct
-{
-    StringView *data;
-    size_t len;
-    size_t cap;
-} SVList;
-
 // The kinds of a unit.
 typedef enum
 {
@@ -463,6 +468,88 @@ void _cut_build_add(CutUnit *first, ...);
 
 // Run build.
 int cut_build_run(int argc, char **argv);
+
+
+/************************************************
+ * CLI Flag Parsing
+ ************************************************/
+
+typedef enum
+{
+    CUT_FLAG_BOOL,
+    CUT_FLAG_INT,
+    CUT_FLAG_STR,
+} CutFlagKind;
+
+typedef struct
+{
+    void *data;
+    StringView desc;
+    StringView long_name;
+    char short_name;
+    CutFlagKind kind;
+} CutFlag;
+
+typedef struct
+{
+    CutFlag *data;
+    size_t len;
+    size_t cap;
+} CutFlagList;
+
+typedef struct
+{
+    SVList commands;
+    CutFlagList optional;
+} CutFlagParser;
+
+typedef struct
+{
+    StringView desc;
+    char short_name;
+} CutFlagOpt;
+
+// Initialize a flag parser.
+void cut_fp_init(CutFlagParser *fp);
+
+// Reset a flag parser's configuration.
+void cut_fp_reset(CutFlagParser *fp);
+
+// Free a flag parser.
+void cut_fp_free(CutFlagParser *fp);
+
+// Add a command to the flag parser.
+void cut_fp_add_command(CutFlagParser *fp, StringView cmd);
+
+// Add an optional flag to the flag parser.
+void cut_fp_add_flag_opt(CutFlagParser *fp, CutFlagKind kind, 
+        void *data, StringView name, CutFlagOpt opt);
+
+#define cut_fp_add_flag(fp, data, name, ...) cut_fp_add_flag_opt((fp), \
+    _Generic((data), \
+        bool *:       CUT_FLAG_BOOL, \
+        int *:        CUT_FLAG_INT, \
+        StringView *: CUT_FLAG_STR), \
+    (data), (name), (CutFlagOpt){ \
+        .desc=SV(""), .short_name=0, \
+    __VA_ARGS__})
+
+typedef enum
+{
+    CUT_FP_OK,
+    CUT_FP_INVALID_VALUE,
+    CUT_FP_MISSING_VALUE,
+} CutFPStatus;
+
+typedef struct
+{
+    String *msg;
+    CutFPStatus status;
+} CutFPResult;
+
+StringView cut_fp_get_command(CutFlagParser *fp, int argc, char **argv);
+
+CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 
 
 #endif // CUT_H
@@ -727,8 +814,56 @@ bool sv_endswith(StringView s, StringView suffix)
     return sv_equal(s, suffix);
 }
 
+// Convert a string view to int.
+bool sv_to_int(StringView s, int *out)
+{
+    if (s.len == 0) return false;
+
+    bool neg = false;
+
+    if (sv_startswith(s, SV("+")))
+        sv_shift(&s, 1);
+
+    if (sv_startswith(s, SV("-")))
+    {
+        sv_shift(&s, 1);
+        neg = true;
+    }
+
+    unsigned int mag = 0;
+    const unsigned int max_pos = INT_MAX;
+    const unsigned int max_neg = INT_MAX + 1u;
+
+    for (size_t i = 0; i < s.len; i++)
+    {
+        char c = s.data[i];
+        if (c < '0' || c > '9') return false;
+
+        unsigned int digit = c - '0';
+        unsigned int limit = neg ? max_neg : max_pos;
+
+        if (mag > (limit - digit) / 10)
+            return false;
+
+        mag = mag * 10 + digit;
+    }
+
+    *out = neg ? -mag : mag;
+    return true;
+}
+
+void svlist_join(SVList *sv, String *sb, StringView delim)
+{
+    DA_FOR(sv, i)
+    {
+        str_appendf(sb, SV_FMT, SV_ARG(da_at(sv, i)));
+        if (i < sv->len-1)
+            str_appendf(sb, SV_FMT, SV_ARG(delim));
+    }
+}
+
 // Format the string list into a whitespace-separated string.
-static void str_list_format(SVList *sl, String *sb, StringView prefix)
+static void command_format(SVList *sl, String *sb, StringView prefix)
 {
     DA_FOR(sl, i)
     {
@@ -796,12 +931,12 @@ static void generate_build_command(CutUnit *unit, String *sb)
 {
     str_appendf(sb, SV_FMT" ", SV_ARG(cut_builder.cc));
 
-    str_list_format(&unit->sources, sb, SV(""));
-    str_list_format(&unit->includes, sb, SV("-I"));
-    str_list_format(&unit->flags, sb, SV(""));
-    str_list_format(&unit->defines, sb, SV("-D"));
-    str_list_format(&unit->lib_dirs, sb, SV("-L"));
-    str_list_format(&unit->libs, sb, SV("-l"));
+    command_format(&unit->sources, sb, SV(""));
+    command_format(&unit->includes, sb, SV("-I"));
+    command_format(&unit->flags, sb, SV(""));
+    command_format(&unit->defines, sb, SV("-D"));
+    command_format(&unit->lib_dirs, sb, SV("-L"));
+    command_format(&unit->libs, sb, SV("-l"));
 
     str_appendf(sb, "-o "SV_FMT"/", SV_ARG(cut_builder.build_dir));
     str_appendf(sb, SV_FMT" ", SV_ARG(unit->name));
@@ -1310,6 +1445,294 @@ int cut_build_run(int argc, char **argv)
            "    <cut> rebuild <cmd>    rebuild script executable\n");
 
     return 1;
+}
+
+
+/************************************************
+ * CLI Flag Parsing
+ ************************************************/
+
+// Initialize a flag parser.
+void cut_fp_init(CutFlagParser *fp)
+{
+    da_init(&fp->commands);
+    da_init(&fp->optional);
+}
+
+// Reset a flag parser's configuration.
+void cut_fp_reset(CutFlagParser *fp)
+{
+    da_reset(&fp->commands);
+    da_reset(&fp->optional);
+}
+
+// Free a flag parser.
+void cut_fp_free(CutFlagParser *fp)
+{
+    da_free(&fp->commands);
+    da_free(&fp->optional);
+}
+
+// Add a command to the flag parser.
+void cut_fp_add_command(CutFlagParser *fp, StringView cmd)
+{
+    da_append(&fp->commands, cmd);
+}
+
+// Add an optional flag to the flag parser.
+void cut_fp_add_flag_opt(CutFlagParser *fp, CutFlagKind kind, 
+        void *data, StringView name, CutFlagOpt opt)
+{
+    CutFlag f = {
+        .data = data,
+        .long_name = name,
+        .kind = kind,
+        .short_name = opt.short_name,
+        .desc = opt.desc,
+    };
+    da_append(&fp->optional, f);
+}
+
+static bool flag_find_by_name(CutFlagParser *fp, StringView name, CutFlag *out)
+{
+    DA_FOR(&fp->optional, i)
+    {
+        CutFlag f = da_at(&fp->optional, i);
+        if (sv_equal(f.long_name, name))
+        {
+            if (out)
+                *out = f;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool flag_find_by_short(CutFlagParser *fp, char s_name, CutFlag *out)
+{
+    DA_FOR(&fp->optional, i)
+    {
+        CutFlag f = da_at(&fp->optional, i);
+        if (f.short_name == s_name)
+        {
+            if (out)
+                *out = f;
+            return true;
+        }
+    }
+    return false;
+}
+
+typedef enum
+{
+    FLAG_NONE,
+    FLAG_SEP,
+    FLAG_LONG,
+    FLAG_SHORT,
+} FlagShape;
+
+static FlagShape flag_shape(StringView s)
+{
+    if (sv_startswith(s, SV("--")))
+    {
+        return s.len == 2 ? FLAG_SEP : FLAG_LONG;
+    }
+    if (sv_startswith(s, SV("-")))
+    {
+        return FLAG_SHORT;
+    }
+    return FLAG_NONE;
+}
+
+static CutFPResult fp_ok(void)
+{
+    return (CutFPResult){.msg=NULL, .status=CUT_FP_OK};
+}
+
+static CutFPResult fp_error(CutFPStatus s, CutFlag f, StringView v)
+{
+    CutFPResult r = {0};
+    r.status = s;
+    r.msg = malloc(sizeof(String));
+    str_init(r.msg);
+
+    switch (s)
+    {
+        case CUT_FP_MISSING_VALUE:
+            str_appendf(r.msg, "missing value for flag '"SV_FMT"'", SV_ARG(f.long_name));
+            break;
+
+        case CUT_FP_INVALID_VALUE:
+            str_appendf(r.msg, "invalid value for flag '"SV_FMT"': "SV_FMT, 
+                    SV_ARG(f.long_name), SV_ARG(v));
+            break;
+
+        default:
+            break;
+    }
+    return r;
+}
+
+StringView cut_fp_get_command(CutFlagParser *fp, int argc, char **argv)
+{
+    if (argc <= 1) return SV("");
+
+    StringView arg = SV(argv[1]);
+
+    DA_FOR(&fp->commands, i)
+    {
+        StringView cmd = da_at(&fp->commands, i);
+        if (sv_equal(arg, cmd))
+            return cmd;
+    }
+    return SV("");
+}
+
+CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
+{
+    if (argc <= 1) return fp_ok();
+
+    int pos = 1;
+    bool seen_sep = false;
+
+    while (pos < argc)
+    {
+        bool is_short = false;
+
+        if (seen_sep)
+            goto positional;
+
+        CutFlag flag = {0};
+        StringView val_str = {0};
+        StringView arg = SV(argv[pos]);
+
+        switch (flag_shape(arg))
+        {
+            case FLAG_SEP:
+                seen_sep = true;
+                pos++;
+                // fallthrough
+            case FLAG_NONE:
+                goto positional;
+
+            case FLAG_SHORT:
+                sv_shift(&arg, 1);
+
+                if (arg.len > 1)
+                {
+                    for (size_t i = 0; i < arg.len; i++)
+                    {
+                        CutFlag f = {0};
+                        if (!flag_find_by_short(fp, arg.data[i], &f))
+                            goto positional;
+
+                        switch (f.kind)
+                        {
+                            case CUT_FLAG_BOOL:
+                                *(bool *)f.data = true;
+                                break;
+
+                            case CUT_FLAG_INT:
+                                *(int *)f.data += 1;
+                                break;
+
+                            default:
+                                goto positional;
+                        }
+                    }
+                    pos++;
+                    continue;
+                }
+
+                if (!flag_find_by_short(fp, arg.data[0], &flag))
+                    goto positional;
+
+                is_short = true;
+                break;
+
+            case FLAG_LONG:
+                sv_shift(&arg, 2);
+                StringView name = sv_split(&arg, '=');
+
+                if (!flag_find_by_name(fp, name, &flag))
+                    goto positional;
+
+                if (arg.len > 0)
+                    val_str = arg;
+
+                break;
+        }
+
+        if (flag.kind == CUT_FLAG_BOOL)
+        {
+            *(bool *)flag.data = true;
+            pos++;
+            continue;
+        }
+
+        if (val_str.len == 0 && pos+1 < argc)
+        {
+            val_str = SV(argv[pos+1]);
+            switch (flag_shape(val_str))
+            {
+                case FLAG_SHORT:
+                    if (flag_find_by_short(fp, val_str.data[1], NULL))
+                    {
+                        if (flag.kind == CUT_FLAG_INT && is_short)
+                            break;
+                        return fp_error(CUT_FP_MISSING_VALUE, flag, val_str);
+                    }
+                    break;
+
+                case FLAG_SEP:
+                    return fp_error(CUT_FP_INVALID_VALUE, flag, val_str);
+
+                case FLAG_LONG:
+                    if (flag_find_by_name(fp, sv_slice(val_str, .from=2), NULL))
+                        return fp_error(CUT_FP_MISSING_VALUE, flag, val_str);
+                    break;
+
+                case FLAG_NONE:
+                    break;
+            }
+        }
+
+        if (flag.kind == CUT_FLAG_STR)
+        {
+            if (val_str.len == 0)
+                return fp_error(CUT_FP_MISSING_VALUE, flag, val_str);
+            *(StringView *)flag.data = val_str;
+            pos++;
+        }
+
+        if (flag.kind == CUT_FLAG_INT)
+        {
+            int val = 0;
+            if (sv_to_int(val_str, &val))
+            {
+                *(int *)flag.data = val;
+                pos++;
+            }
+            else if (is_short)
+            {
+                *(int *)flag.data += 1;
+            }
+            else
+            {
+                return fp_error(CUT_FP_INVALID_VALUE, flag, val_str);
+            }
+        }
+
+        pos++;
+        continue;
+
+positional:
+        if (pos > 1)
+            da_append(out, SV(argv[pos]));
+        pos++;
+    }
+
+    return fp_ok();
 }
 
 #endif // CUT_IMPL

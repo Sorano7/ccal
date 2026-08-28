@@ -49,7 +49,7 @@ typedef struct
 {
     StringView src;
     NumberForm num_form;
-    size_t max_digits;
+    unsigned long max_digits;
     unsigned long base;
 } RenderCtx;
 

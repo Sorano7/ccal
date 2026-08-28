@@ -1,5 +1,5 @@
-#ifndef DIGIT_H
-#define DIGIT_H
+#ifndef NUMBER_H
+#define NUMBER_H
 
 #include <stddef.h>
 #include <gmp.h>

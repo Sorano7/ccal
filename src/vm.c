@@ -5,7 +5,7 @@
 #include <string.h>
 #include <errno.h>
 #include "vm.h"
-#include "digit.h"
+#include "number.h"
 
 #define BASE_DEFAULT 10
 #define BASE_MAX ULONG_MAX

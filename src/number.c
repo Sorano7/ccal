@@ -1,4 +1,4 @@
-#include "digit.h"
+#include "number.h"
 #include <stdlib.h>
 #include <assert.h>
 

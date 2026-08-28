@@ -3,7 +3,7 @@
 
 void shared_config(CutUnit *u)
 {
-    cut_unit_sources(u, "src/digit.c");
+    cut_unit_sources(u, "src/number.c");
     cut_unit_sources(u, "src/lexer.c");
     cut_unit_sources(u, "src/vm.c");
 

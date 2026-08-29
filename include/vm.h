@@ -51,6 +51,7 @@ typedef struct
     NumberForm num_form;
     unsigned long max_digits;
     unsigned long base;
+    bool use_color;
 } RenderCtx;
 
 void vm_init(VM *v);

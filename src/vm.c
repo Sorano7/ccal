@@ -600,32 +600,42 @@ void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
             for (size_t i = 0; i < v->as.error.pos; i++)
                 str_append(sb, " ");
 
+            if (ctx->use_color) str_appendf(sb, AFMT_BOLD ACOLOR_MAGENTA);
             str_appendf(sb, "^ %s", v->as.error.msg);
+            if (ctx->use_color) str_appendf(sb, AFMT_RESET);
             break;
 
         case VAL_NUMBER:
             if (ctx->base >= 62)
             {
+                if (ctx->use_color) str_appendf(sb, ACOLOR_MAGENTA);
                 str_append(sb, "Output base too large");
+                if (ctx->use_color) str_appendf(sb, AFMT_RESET);
                 break;
             }
 
             switch (ctx->num_form)
             {
                 case NUMBER_DECIMAL:
+                    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
                     render_decimal(sb, v->as.number, ctx->base, ctx->max_digits);
+                    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
                     break;
 
                 case NUMBER_RATIONAL:
+                    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
                     char *s = mpq_get_str(NULL, ctx->base, v->as.number);
                     str_append(sb, s);
                     free(s);
+                    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
                     break;
             }
             break;
 
         case VAL_BOOL:
+            if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
             str_appendf(sb, "%s", v->as.boolean ? "true" : "false");
+            if (ctx->use_color) str_appendf(sb, AFMT_RESET);
             break;
     }
 }

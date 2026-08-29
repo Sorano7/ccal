@@ -231,6 +231,24 @@ void svlist_join(SVList *sv, String *sb, StringView delim);
  * Logging
  ************************************************/
 
+#define AFMT_RESET     "\e[0m"
+#define AFMT_BOLD      "\e[1m"
+#define AFMT_DIM       "\e[2m"
+#define AFMT_ITATLIC   "\e[3m"
+#define AFMT_UNDERLINE "\e[4m"
+#define AFMT_BLINK     "\e[5m"
+#define AFMT_REVERSE   "\e[7m"
+#define AFMT_STRIKE    "\e[9m"
+
+#define ACOLOR_BLACK   "\e[30m"
+#define ACOLOR_RED     "\e[31m"
+#define ACOLOR_GREEN   "\e[32m"
+#define ACOLOR_YELLOW  "\e[33m"
+#define ACOLOR_BLUE    "\e[34m"
+#define ACOLOR_MAGENTA "\e[35m"
+#define ACOLOR_CYAN    "\e[36m"
+#define ACOLOR_WHITE   "\e[37m"
+
 // Levels of a log.
 typedef enum
 {
@@ -991,15 +1009,6 @@ static void remove_path(StringView path)
  * Logging
  ************************************************/
 
-// ANSI colors
-#define COLOR_RCT   "\033[0m"
-#define COLOR_FN    "\033[36m"
-#define COLOR_OK    "\033[32m"
-#define COLOR_SUB   "\033[2m"
-#define COLOR_DEBUG "\033[0m"
-#define COLOR_ERROR "\033[33m"
-#define COLOR_FATAL "\033[1;31m"
-
 static void log_free(CutLog *log)
 {
     da_free(log->message);
@@ -1056,9 +1065,9 @@ static void log_list_print(CutLogList *logs, FILE *fdout, const char *prefix)
 
         fprintf(fdout, "%s", prefix);
 
-        if (is_ansi) fprintf(fdout, COLOR_SUB);
+        if (is_ansi) fprintf(fdout, AFMT_DIM);
         fprintf(fdout, "["SV_FMT":%d] ", SV_ARG(log.file), log.line);
-        if (is_ansi) fprintf(fdout, COLOR_RCT);
+        if (is_ansi) fprintf(fdout, AFMT_RESET);
 
         switch (log.level)
         {
@@ -1067,22 +1076,22 @@ static void log_list_print(CutLogList *logs, FILE *fdout, const char *prefix)
                 break;
 
             case CUT_LOG_DEBUG: 
-                if (is_ansi) fprintf(fdout, COLOR_DEBUG);
+                if (is_ansi) fprintf(fdout, AFMT_RESET);
                 fprintf(fdout, "[DEBUG] "); 
                 break;
 
             case CUT_LOG_ERROR: 
-                if (is_ansi) fprintf(fdout, COLOR_ERROR);
+                if (is_ansi) fprintf(fdout, ACOLOR_YELLOW);
                 fprintf(fdout, "[ERROR] "); 
                 break;
 
             case CUT_LOG_FATAL: 
-                if (is_ansi) fprintf(fdout, COLOR_FATAL);
+                if (is_ansi) fprintf(fdout, ACOLOR_RED);
                 fprintf(fdout, "[FATAL] "); 
                 break;
         }
         fprintf(fdout, SV_FMT"\n", SV_ARG(*log.message));
-        if (is_ansi) fprintf(fdout, COLOR_RCT);
+        if (is_ansi) fprintf(fdout, AFMT_RESET);
     }
 }
 
@@ -1134,13 +1143,13 @@ static bool test_registry_flatten(CutTestCase *head, size_t size, CutTestCase *o
 // Print information of a test case.
 static void test_case_info_print(CutTestCase *test, FILE *fdout, bool ansi)
 {
-    if (ansi) fprintf(fdout, COLOR_SUB);
+    if (ansi) fprintf(fdout, AFMT_DIM);
     fprintf(fdout, "["SV_FMT":%d] ", SV_ARG(test->file), test->line);
-    if (ansi) fprintf(fdout, COLOR_RCT);
+    if (ansi) fprintf(fdout, AFMT_RESET);
 
-    if (ansi) fprintf(fdout, COLOR_FN);
+    if (ansi) fprintf(fdout, ACOLOR_CYAN);
     fprintf(fdout, SV_FMT, SV_ARG(test->name));
-    if (ansi) fprintf(fdout, COLOR_RCT);
+    if (ansi) fprintf(fdout, AFMT_RESET);
 
     for (size_t i = test->name.len; i < cut_test_name_max; i++)
         fprintf(fdout, " ");
@@ -1161,16 +1170,16 @@ static bool test_case_status_print(CutLogList *logs, FILE* fdout, bool ansi)
 
     if (failure_count > 0)
     {
-        if (ansi) fprintf(fdout, COLOR_FATAL);
+        if (ansi) fprintf(fdout, ACOLOR_RED);
         fprintf(fdout, "failed\n");
-        if (ansi) fprintf(fdout, COLOR_RCT);
+        if (ansi) fprintf(fdout, AFMT_RESET);
         return true;
     }
     else
     {
-        if (ansi) fprintf(fdout, COLOR_OK);
+        if (ansi) fprintf(fdout, ACOLOR_GREEN);
         fprintf(fdout, "passed\n");
-        if (ansi) fprintf(fdout, COLOR_RCT);
+        if (ansi) fprintf(fdout, AFMT_RESET);
         return false;
     }
 }
@@ -1592,8 +1601,12 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
 {
     if (argc <= 1) return fp_ok();
 
-    int pos = 1;
     bool seen_sep = false;
+
+    int pos = 1;
+
+    if (cut_fp_get_command(fp, argc, argv).len > 0)
+        pos++;
 
     while (pos < argc)
     {
@@ -1727,8 +1740,7 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
         continue;
 
 positional:
-        if (pos > 1)
-            da_append(out, SV(argv[pos]));
+        da_append(out, SV(argv[pos]));
         pos++;
     }
 

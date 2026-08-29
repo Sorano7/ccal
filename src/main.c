@@ -31,6 +31,7 @@ const char repl_help[] = "Commands:\n"
 
 void repl_set_param_value(StringView s, unsigned long *v)
 {
+    s = sv_trim(s);
     if (s.len == 0)
     {
         printf("missing value\n");
@@ -48,13 +49,17 @@ void repl_set_param_value(StringView s, unsigned long *v)
 
 bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
 {
+    if (ctx->use_color) printf(ACOLOR_CYAN);
 
+    src = sv_trim(src);
     StringView cmd = sv_split(&src, ' ');
+
+    bool should_continue = true;
 
     if (sv_equal(cmd, "q") || sv_equal(cmd, "quit"))
     {
         printf("exit\n");
-        return false;
+        should_continue = false;
     }
     else if (sv_equal(cmd, "h") || sv_equal(cmd, "help"))
     {
@@ -63,13 +68,13 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
     else if (sv_equal(cmd, "s") || sv_equal(cmd, "set"))
     {
         StringView param = sv_split(&src, '=');
+        param = sv_trim(param);
+
         if (param.len == 0)
         {
             printf("missing option\n");
-            return true;
         }
-
-        if (sv_equal(param, "dec") || sv_equal(param, "decimal"))
+        else if (sv_equal(param, "dec") || sv_equal(param, "decimal"))
         {
             ctx->num_form = NUMBER_DECIMAL;
             printf("output form: decimal\n");
@@ -104,7 +109,8 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
         printf("unknown command\n");
     }
 
-    return true;
+    if (ctx->use_color) printf(AFMT_RESET);
+    return should_continue;
 }
 
 // Start interactive REPL.
@@ -173,6 +179,7 @@ int main(int argc, char **argv)
         .base = 10,
         .max_digits = 50,
         .num_form = NUMBER_RATIONAL,
+        .use_color = isatty(fileno(stdout)),
     };
 
     CutFlagParser fp;

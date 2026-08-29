@@ -34,6 +34,8 @@ static TokenKind token_kind_get(StringView src, size_t i)
         case '(': return TOK_LPAREN;
         case ')': return TOK_RPAREN;
 
+        case '_': return TOK_UNDER;
+
         case '=':
             NEXT_IS_THEN(src, i, '=', TOK_EQ);
             break;
@@ -84,19 +86,34 @@ bool tokenize(TokenArray *ta, StringView src)
 
             case TOK_DIGIT:
             case TOK_ALPHA:
+                String sb;
+                str_init(&sb);
+
                 size_t start = i;
                 for (;;)
                 {
+                    bool end = false;
                     TokenKind new_kind = token_kind_get(src, i);
-                    if (new_kind == TOK_ALPHA)
-                        kind = TOK_ALNUM;
-                    else if (new_kind != TOK_DIGIT)
-                        break;
-                    i++;
+                    switch (new_kind)
+                    {
+                        case TOK_ALPHA:
+                            kind = TOK_ALNUM;
+                            // fallthrough
+                        case TOK_DIGIT:
+                            str_append(&sb, src.data[i]);
+                            // fallthrough
+                        case TOK_UNDER:
+                            i++;
+                            break;
+
+                        default:
+                            end = true;
+                            break;
+                    }
+                    if (end) break;
                 }
 
-                StringView v = sv_slice(src, .from=start, .to=i);
-                da_append(ta, token_create(kind, v, start));
+                da_append(ta, token_create(kind, SV(sb), start));
                 break;
 
             case TOK_EQ:

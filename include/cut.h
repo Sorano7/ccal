@@ -133,11 +133,13 @@ bool _sv_equal(StringView a, StringView b);
     (s)->data[(s)->len] = '\0'; \
 } while (0)
 
+void str_append_char(String *s, char v);
 void str_append_view(String *s, StringView v);
 void str_append_str(String *s, String *v);
 void str_append_cstr(String *s, const char *v);
 
 #define str_append(s, v) _Generic((v), \
+    char:         str_append_char, \
     char *:       str_append_cstr, \
     const char *: str_append_cstr, \
     StringView:   str_append_view, \
@@ -665,6 +667,12 @@ bool _sv_equal(StringView a, StringView b)
         if (a.data[i] != b.data[i]) return false;
 
     return true;
+}
+
+void str_append_char(String *s, char v)
+{
+    da_append(s, v);
+    str_append_null(s);
 }
 
 void str_append_view(String *s, StringView v)

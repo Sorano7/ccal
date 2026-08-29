@@ -597,9 +597,9 @@ static void number_value_render(Value *v, String *sb, RenderCtx *ctx)
 
     if (ctx->base != BASE_DEFAULT)
     {
-        str_appendf(sb, AFMT_DIM);
+        if (ctx->use_color) str_appendf(sb, AFMT_DIM);
         str_appendf(sb, "%lu#", ctx->base);
-        str_appendf(sb, AFMT_RESET);
+        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
     }
 
     if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);

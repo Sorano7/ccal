@@ -10,7 +10,8 @@
         .max_digits=50, \
         .base=10, \
         .num_form=NUMBER_RATIONAL, \
-        .src=SV("") \
+        .src=SV(""), \
+        .use_color=false, \
     }; \
     (void)ctx; \
     VM vm; vm_init(&vm); \
@@ -110,6 +111,14 @@ TEST(decimal_eval)
 
         EVAL("1.1(6)", &val);
         NUMBER_EQ(&val, 7, 6);
+    FIXTURE_END();
+}
+
+TEST(underscore_ignored_in_literals)
+{
+    FIXTURE_START();
+        EVAL("1_000_000", &val);
+        NUMBER_EQ(&val, 1000000, 1);
     FIXTURE_END();
 }
 

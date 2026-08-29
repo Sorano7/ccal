@@ -30,6 +30,7 @@
     X(TOK_DOT,     ".") \
     X(TOK_COMMA,   ",") \
     X(TOK_HASH,    "#") \
+    X(TOK_UNDER,   "_") \
 \
     X(TOK_LBRAC,   "[") \
     X(TOK_RBRAC,   "]") \

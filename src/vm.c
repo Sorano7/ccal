@@ -585,6 +585,40 @@ bool vm_evaluate(VM *v, StringView src, Value *out)
     return true;
 }
 
+static void number_value_render(Value *v, String *sb, RenderCtx *ctx)
+{
+    if (ctx->base >= 62)
+    {
+        if (ctx->use_color) str_appendf(sb, ACOLOR_MAGENTA);
+        str_append(sb, "Output base too large");
+        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+        return;
+    }
+
+    if (ctx->base != BASE_DEFAULT)
+    {
+        str_appendf(sb, AFMT_DIM);
+        str_appendf(sb, "%lu#", ctx->base);
+        str_appendf(sb, AFMT_RESET);
+    }
+
+    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+    switch (ctx->num_form)
+    {
+        case NUMBER_DECIMAL:
+            render_decimal(sb, v->as.number, ctx->base, ctx->max_digits);
+            break;
+
+        case NUMBER_RATIONAL:
+            char *s = mpq_get_str(NULL, ctx->base, v->as.number);
+            str_append(sb, s);
+            free(s);
+            break;
+    }
+
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+}
+
 // Render a value to the string builder.
 // The render may contain newlines but will not have a final newline.
 void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
@@ -606,30 +640,7 @@ void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
             break;
 
         case VAL_NUMBER:
-            if (ctx->base >= 62)
-            {
-                if (ctx->use_color) str_appendf(sb, ACOLOR_MAGENTA);
-                str_append(sb, "Output base too large");
-                if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-                break;
-            }
-
-            switch (ctx->num_form)
-            {
-                case NUMBER_DECIMAL:
-                    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-                    render_decimal(sb, v->as.number, ctx->base, ctx->max_digits);
-                    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-                    break;
-
-                case NUMBER_RATIONAL:
-                    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-                    char *s = mpq_get_str(NULL, ctx->base, v->as.number);
-                    str_append(sb, s);
-                    free(s);
-                    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-                    break;
-            }
+            number_value_render(v, sb, ctx);
             break;
 
         case VAL_BOOL:

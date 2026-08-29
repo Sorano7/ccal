@@ -343,7 +343,7 @@ TEST(integer_render_correct)
         ctx.base = 16;
         EVAL_RENDER("255", &val);
         // GMP defaults to lowercase for base <= 36
-        CUT_CHECK(sv_equal(sb, "ff"));
+        CUT_CHECK(sv_equal(sb, "16#ff"));
     FIXTURE_END();
 }
 

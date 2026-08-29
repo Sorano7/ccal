@@ -1,5 +1,5 @@
-#ifndef DIGIT_H
-#define DIGIT_H
+#ifndef NUMBER_H
+#define NUMBER_H
 
 #include <stddef.h>
 #include <gmp.h>
@@ -30,6 +30,7 @@ typedef enum
     DIGIT_OK,
     DIGIT_INVALID,
     DIGIT_OOB,
+    DIGIT_BASE_TOO_LARGE,
 } DRKind;
 
 typedef struct
@@ -43,5 +44,7 @@ DigitResult digits_from_alnum(DigitArray *ds, StringView s, unsigned long base);
 void literal_init(Literal *lit);
 void literal_free(Literal *lit);
 void literal_to_mpq(Literal *lit, unsigned long base, mpq_t out);
+
+void render_decimal(String *sb, const mpq_t n, int base, size_t max_digits);
 
 #endif

@@ -5,7 +5,7 @@
 #include <string.h>
 #include <errno.h>
 #include "vm.h"
-#include "digit.h"
+#include "number.h"
 
 #define BASE_DEFAULT 10
 #define BASE_MAX ULONG_MAX
@@ -246,6 +246,8 @@ static bool parse_number_part_alnum(VM *v, DigitArray *ds, Value *err)
             return value_errorf(err, t.pos+res.pos, "Not a digit");
         case DIGIT_OOB:
             return value_errorf(err, t.pos+res.pos, "Digit out of bounds for base %lu", v->base);
+        case DIGIT_BASE_TOO_LARGE:
+            return value_errorf(err, t.pos, "Base too large for alphanumeric spelling.");
         default:
             break;
     }
@@ -583,29 +585,68 @@ bool vm_evaluate(VM *v, StringView src, Value *out)
     return true;
 }
 
-// Print the value to stdout.
-// The src string must be the one that produced the value.
-void vm_value_print(Value *v, StringView src)
+static void number_value_render(Value *v, String *sb, RenderCtx *ctx)
+{
+    if (ctx->base >= 62)
+    {
+        if (ctx->use_color) str_appendf(sb, ACOLOR_MAGENTA);
+        str_append(sb, "Output base too large");
+        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+        return;
+    }
+
+    if (ctx->base != BASE_DEFAULT)
+    {
+        str_appendf(sb, AFMT_DIM);
+        str_appendf(sb, "%lu#", ctx->base);
+        str_appendf(sb, AFMT_RESET);
+    }
+
+    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+    switch (ctx->num_form)
+    {
+        case NUMBER_DECIMAL:
+            render_decimal(sb, v->as.number, ctx->base, ctx->max_digits);
+            break;
+
+        case NUMBER_RATIONAL:
+            char *s = mpq_get_str(NULL, ctx->base, v->as.number);
+            str_append(sb, s);
+            free(s);
+            break;
+    }
+
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+}
+
+// Render a value to the string builder.
+// The render may contain newlines but will not have a final newline.
+void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
 {
     switch (v->kind)
     {
         case VAL_VOID:
-            printf("<void>\n");
+            str_append(sb, "<void>");
             break;
 
         case VAL_ERROR:
-            printf(SV_FMT"\n", SV_ARG(src));
+            str_appendf(sb, SV_FMT"\n", SV_ARG(ctx->src));
             for (size_t i = 0; i < v->as.error.pos; i++)
-                printf(" ");
-            printf("^ %s\n", v->as.error.msg);
+                str_append(sb, " ");
+
+            if (ctx->use_color) str_appendf(sb, AFMT_BOLD ACOLOR_MAGENTA);
+            str_appendf(sb, "^ %s", v->as.error.msg);
+            if (ctx->use_color) str_appendf(sb, AFMT_RESET);
             break;
 
         case VAL_NUMBER:
-            gmp_printf("%Qd\n", v->as.number);
+            number_value_render(v, sb, ctx);
             break;
 
         case VAL_BOOL:
-            printf("%s\n", v->as.boolean ? "true" : "false");
+            if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+            str_appendf(sb, "%s", v->as.boolean ? "true" : "false");
+            if (ctx->use_color) str_appendf(sb, AFMT_RESET);
             break;
     }
 }

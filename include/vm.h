@@ -39,11 +39,26 @@ typedef struct
     } as;
 } Value;
 
+typedef enum
+{
+    NUMBER_DECIMAL,
+    NUMBER_RATIONAL,
+} NumberForm;
+
+typedef struct
+{
+    StringView src;
+    NumberForm num_form;
+    unsigned long max_digits;
+    unsigned long base;
+    bool use_color;
+} RenderCtx;
+
 void vm_init(VM *v);
 void vm_free(VM *v);
 
 bool vm_evaluate(VM *v, StringView src, Value *out);
-void vm_value_print(Value *v, StringView src);
+void vm_value_render(Value *v, String *sb, RenderCtx *ctx);
 void vm_value_free(Value *v);
 
 #endif

@@ -30,6 +30,7 @@ typedef enum
     DIGIT_OK,
     DIGIT_INVALID,
     DIGIT_OOB,
+    DIGIT_BASE_TOO_LARGE,
 } DRKind;
 
 typedef struct

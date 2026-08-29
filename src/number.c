@@ -2,18 +2,28 @@
 #include <stdlib.h>
 #include <assert.h>
 
+#define DIGIT_TO_0     48
+#define UPPER_TO_10    55
+#define LOWER_TO_36    61
+#define LOWER_TO_10    87
+#define BASE_MAX_ALNUM 62
+
 // Convert a char to its digit number.
 // Return ULONG_MAX if invalid.
-static unsigned long char_to_num(char c)
+static unsigned long char_to_num(char c, unsigned long base)
 {
     if (c >= '0' && c <= '9')
-        return c - 48;
+        return c - DIGIT_TO_0;
 
     if (c >= 'A' && c <= 'Z')
-        return c - 55;
+        return c - UPPER_TO_10;
 
-    else if (c >= 'a' && c <= 'z')
-        return c - 61;
+    if (c >= 'a' && c <= 'z')
+    {
+        if (base > 36)
+            return c - LOWER_TO_36;
+        return c - LOWER_TO_10;
+    }
 
     else
         return ULONG_MAX;
@@ -45,9 +55,11 @@ static DigitResult digit_error(size_t pos, DRKind kind)
 // Create a sequnece of digits from an alphanumeric string.
 DigitResult digits_from_alnum(DigitArray *ds, StringView s, unsigned long base)
 {
+    if (base > BASE_MAX_ALNUM)
+        return (DigitResult){.kind=DIGIT_BASE_TOO_LARGE, .pos=0};
     for (size_t i = 0; i < s.len; i++)
     {
-        unsigned long val = char_to_num(s.data[i]);
+        unsigned long val = char_to_num(s.data[i], base);
         if (val == ULONG_MAX)
             return digit_error(i, DIGIT_INVALID);
         if (val >= base)

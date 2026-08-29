@@ -246,6 +246,8 @@ static bool parse_number_part_alnum(VM *v, DigitArray *ds, Value *err)
             return value_errorf(err, t.pos+res.pos, "Not a digit");
         case DIGIT_OOB:
             return value_errorf(err, t.pos+res.pos, "Digit out of bounds for base %lu", v->base);
+        case DIGIT_BASE_TOO_LARGE:
+            return value_errorf(err, t.pos, "Base too large for alphanumeric spelling.");
         default:
             break;
     }

@@ -333,10 +333,10 @@ TEST(boolean_render_correct)
 {
     FIXTURE_START();
         EVAL_RENDER("999 * 0.5 < 666 * 0.9", &val);
-        CUT_CHECK(sv_equal(sb, "true"));
+        CUT_CHECK(sv_equal(sb, "@true"));
 
         EVAL_RENDER("999 * 0.5 > 666 * 0.9", &val);
-        CUT_CHECK(sv_equal(sb, "false"));
+        CUT_CHECK(sv_equal(sb, "@false"));
     FIXTURE_END();
 }
 
@@ -379,6 +379,57 @@ TEST(decimal_render_correct)
 
         EVAL_RENDER("5/6", &val);
         CUT_CHECK(sv_equal(sb, "0.8(3)"));
+    FIXTURE_END();
+}
+
+
+/************************************
+ * Variable bindings
+ ************************************/
+
+TEST(variable_assign_and_evaluate)
+{
+    FIXTURE_START();
+        EVAL("@x = 1", &val);
+        NUMBER_EQ(&val, 1, 1);
+
+        EVAL("@x", &val);
+        NUMBER_EQ(&val, 1, 1);
+
+        EVAL("@x = 200", &val);
+        NUMBER_EQ(&val, 200, 1);
+
+        EVAL("@x", &val);
+        NUMBER_EQ(&val, 200, 1);
+    FIXTURE_END();
+}
+
+TEST(variable_dynamic_typing)
+{
+    FIXTURE_START();
+        EVAL("@x = 1", &val);
+        NUMBER_EQ(&val, 1, 1);
+
+        EVAL("@x = @x > 1", &val);
+        BOOL_EQ(&val, false);
+    FIXTURE_END();
+}
+
+TEST(cannot_access_unknown_variable)
+{
+    FIXTURE_START();
+        EVAL_FAIL("@x", &val);
+    FIXTURE_END();
+}
+
+TEST(builtin_constants_eval)
+{
+    FIXTURE_START();
+        EVAL("@true", &val);
+        BOOL_EQ(&val, true);
+
+        EVAL("@false", &val);
+        BOOL_EQ(&val, false);
     FIXTURE_END();
 }
 

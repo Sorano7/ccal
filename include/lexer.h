@@ -35,7 +35,14 @@
     X(TOK_LBRAC,   "[") \
     X(TOK_RBRAC,   "]") \
     X(TOK_LPAREN,  "(") \
-    X(TOK_RPAREN,  ")")
+    X(TOK_RPAREN,  ")") \
+\
+    X(TOK_AT,      "@") \
+    X(TOK_ID,      "identifier") \
+    X(TOK_ASSIGN,  "=") \
+\
+    X(TOK_TRUE,    "@true") \
+    X(TOK_FALSE,   "@false")
 
 #define AS_ENUM(name, _) name,
 #define AS_STR(name, s)  [name] = (s),

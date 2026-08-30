@@ -39,7 +39,7 @@ void vm_value_free(Value *v)
 }
 
 // Set a value from another value.
-static void value_set(Value *v, Value *from)
+static void value_set(Value *v, const Value *from)
 {
     v->kind = from->kind;
     switch (v->kind)
@@ -155,6 +155,16 @@ void vm_init(VM *v)
     v->base = BASE_DEFAULT;
     v->ta = NULL;
     v->pos = 0;
+    v->scope = malloc(sizeof(Env));
+    da_init(v->scope);
+}
+
+void vm_reset(VM *v)
+{
+    v->base = BASE_DEFAULT;
+    v->ta = NULL;
+    v->pos = 0;
+    da_reset(v->scope);
 }
 
 // Free a VM.
@@ -164,6 +174,8 @@ void vm_free(VM *v)
         da_free(v->ta);
     v->pos = 0;
     v->base = 0;
+    da_free(v->scope);
+    free(v->scope);
 }
 
 #define AT_OR_LAST(v, p) (p) < (v)->ta->len ? (p) : (v)->ta->len-1
@@ -392,6 +404,78 @@ static bool eval_neg(VM *v, Value *out)
     return true;
 }
 
+// Assign a symbol to the current scope.
+static void vm_symbol_set(VM *v, StringView id, const Value *value)
+{
+    DA_FOR(v->scope, i)
+    {
+        Symbol existing = da_at(v->scope, i);
+        if (sv_equal(existing.id, id))
+        {
+            value_set(&existing.value, value);
+            return;
+        }
+    }
+    Symbol s = {0};
+    s.id = id;
+    value_set(&s.value, value);
+    da_append(v->scope, s);
+}
+
+static bool vm_symbol_get(VM *v, StringView id, Value *out)
+{
+    DA_FOR(v->scope, i)
+    {
+        Symbol existing = da_at(v->scope, i);
+        if (sv_equal(existing.id, id))
+        {
+            value_set(out, &existing.value);
+            return true;
+        }
+    }
+    return false;
+}
+
+// Evaluate an assignment expression.
+static bool eval_assign(VM *v, Value *out)
+{
+    Token id = vm_token(v);
+    CONSUME_EXPECT(v, TOK_ID, out);
+    CONSUME_EXPECT(v, TOK_ASSIGN, out);
+    if (!eval_expr(v, PREC_PRIMARY, out))
+        return false;
+    vm_symbol_set(v, id.value, out);
+    return true;
+}
+
+// Evaluate a symbol.
+static bool eval_symbol(VM *v, Value *out)
+{
+    Token id = vm_token(v);
+    v->pos++;
+    if (!vm_symbol_get(v, id.value, out))
+        return value_errorf(out, id.pos, "Not found in the current scope");
+    return true;
+}
+
+// Evaluate a builtin constant, return false if not a builtin.
+static bool try_eval_builtin(VM *v, Value *out)
+{
+    Token t = vm_token(v);
+
+    if (t.kind == TOK_TRUE)
+        value_bool(out, true);
+
+    else if (t.kind == TOK_FALSE)
+        value_bool(out, false);
+
+    else
+        return false;
+
+    v->pos++;
+    return true;
+}
+
 // Evaluate a null denotation expression.
 static bool eval_nud(VM *v, Value *out)
 {
@@ -402,20 +486,28 @@ static bool eval_nud(VM *v, Value *out)
     if (vm_peek(v, 1).kind == TOK_HASH)
         return eval_base(v, out);
 
-    else if (vm_is_alnum(v))
+    if (vm_peek(v, 1).kind == TOK_ASSIGN)
+        return eval_assign(v, out);
+
+    if (t.kind == TOK_ID)
+        return eval_symbol(v, out);
+
+    if (vm_is_alnum(v))
         return eval_number(v, DIGIT_FMT_ALNUM, out);
 
-    else if (vm_is_digit_list(v))
+    if (vm_is_digit_list(v))
         return eval_number(v, DIGIT_FMT_LIST, out);
 
-    else if (t.kind == TOK_LPAREN)
+    if (t.kind == TOK_LPAREN)
         return eval_group(v, out);
 
-    else if (t.kind == TOK_MINUS)
+    if (t.kind == TOK_MINUS)
         return eval_neg(v, out);
 
-    else
-        return value_errorf(out, t.pos, "Expected expression");
+    if (try_eval_builtin(v, out))
+        return out->kind != VAL_ERROR;
+
+    return value_errorf(out, t.pos, "Expected expression");
 }
 
 #define MPQ_INFIX(f, l, r) f((l)->as.number, (l)->as.number, (r)->as.number)
@@ -645,7 +737,7 @@ void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
 
         case VAL_BOOL:
             if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-            str_appendf(sb, "%s", v->as.boolean ? "true" : "false");
+            str_appendf(sb, "@%s", v->as.boolean ? "true" : "false");
             if (ctx->use_color) str_appendf(sb, AFMT_RESET);
             break;
     }

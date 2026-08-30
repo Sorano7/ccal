@@ -4,14 +4,6 @@
 #include "lexer.h"
 #include <gmp.h>
 
-// A VM for just-in-time evaluation.
-typedef struct
-{
-    unsigned long base;
-    TokenArray *ta;
-    size_t pos;
-} VM;
-
 // Kinds of a value.
 typedef enum
 {
@@ -39,6 +31,19 @@ typedef struct
     } as;
 } Value;
 
+typedef struct
+{
+    StringView id;
+    Value value;
+} Symbol;
+
+typedef struct
+{
+    Symbol *data;
+    size_t len;
+    size_t cap;
+} Env;
+
 typedef enum
 {
     NUMBER_DECIMAL,
@@ -54,7 +59,17 @@ typedef struct
     bool use_color;
 } RenderCtx;
 
+// A VM for just-in-time evaluation.
+typedef struct
+{
+    unsigned long base;
+    TokenArray *ta;
+    size_t pos;
+    Env *scope;
+} VM;
+
 void vm_init(VM *v);
+void vm_reset(VM *v);
 void vm_free(VM *v);
 
 bool vm_evaluate(VM *v, StringView src, Value *out);

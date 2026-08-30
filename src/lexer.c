@@ -6,18 +6,17 @@
 
 const char *tk_to_str[] = {TOKENS(AS_STR)};
 
-#define NEXT_IS_THEN(src, i, c, tk) do { \
-    if ((src).data[(i)+1] == (c)) return (tk); \
-} while (0)
-
-// Get the kind of token at the pointer.
-static TokenKind token_kind_get(StringView src, size_t i)
+// Get the kind of token.
+static TokenKind token_kind_get(StringView src)
 {
-    if (isdigit(src.data[i])) return TOK_DIGIT;
-    if (isalpha(src.data[i])) return TOK_ALPHA;
-    if (isspace(src.data[i])) return TOK_SPACE;
+    char c = src.data[0];
+    char next = src.len > 1 ? src.data[1] : '\0';
 
-    switch (src.data[i])
+    if (isdigit(c)) return TOK_DIGIT;
+    if (isalpha(c)) return TOK_ALPHA;
+    if (isspace(c)) return TOK_SPACE;
+
+    switch (c)
     {
         case '+': return TOK_PLUS;
         case '-': return TOK_MINUS;
@@ -35,31 +34,110 @@ static TokenKind token_kind_get(StringView src, size_t i)
         case ')': return TOK_RPAREN;
 
         case '_': return TOK_UNDER;
+        case '@': return TOK_AT;
 
         case '=':
-            NEXT_IS_THEN(src, i, '=', TOK_EQ);
-            break;
-
+            return next == '=' ? TOK_EQ : TOK_ASSIGN;
         case '!':
-            NEXT_IS_THEN(src, i, '=', TOK_NEQ);
-            break;
+            if (next != '=') break;
+            return TOK_NEQ;
 
         case '<':
-            NEXT_IS_THEN(src, i, '=', TOK_LEQ);
-            return TOK_LT;
-
         case '>':
-            NEXT_IS_THEN(src, i, '=', TOK_GEQ);
-            return TOK_GT;
+            if (next == '=')
+                return c == '<' ? TOK_LEQ : TOK_GEQ;
+            return c == '<' ? TOK_LT : TOK_GT;
     }
 
     return TOK_INVALID;
+}
+
+static size_t token_len(TokenKind kind)
+{
+    switch (kind)
+    {
+        case TOK_EQ:
+        case TOK_NEQ:
+        case TOK_LEQ:
+        case TOK_GEQ:
+            return 2;
+
+        default:
+            return 1;
+    }
 }
 
 // Create a token.
 static Token token_create(TokenKind kind, StringView value, size_t pos)
 {
     return (Token){.value=value, .pos=pos, .kind=kind};
+}
+
+// Construct a number token and return the length.
+static size_t build_number_token(TokenArray *ta, StringView src, size_t pos)
+{
+    String sb;
+    str_init(&sb);
+    TokenKind kind = TOK_DIGIT;
+
+    size_t i = 0;
+    for (; i < src.len; i++)
+    {
+        bool end = false;
+        switch (token_kind_get(sv_slice(src, .from=i)))
+        {
+            case TOK_ALPHA:
+                kind = TOK_ALNUM;
+                // fallthrough
+            case TOK_DIGIT:
+                str_append(&sb, src.data[i]);
+                // fallthrough
+            case TOK_UNDER:
+                break;
+
+            default:
+                end = true;
+                break;
+        }
+        if (end) break;
+    }
+
+    da_append(ta, token_create(kind, SV(sb), pos));
+    // sb leaked here
+    return i;
+}
+
+// Construct an identifier and return the length.
+static size_t build_id_token(TokenArray *ta, StringView src, size_t pos)
+{
+    size_t i = 1;
+    for (; i < src.len; i++)
+    {
+        bool end = false;
+        switch (token_kind_get(sv_slice(src, .from=i)))
+        {
+            case TOK_ALPHA:
+            case TOK_DIGIT:
+            case TOK_UNDER:
+                break;
+
+            default:
+                end = true;
+                break;
+        }
+        if (end) break;
+    }
+    src = sv_slice(src, .to=i);
+
+    TokenKind kind = TOK_ID;
+
+    if (sv_equal(src, "@true"))
+        kind = TOK_TRUE;
+    else if (sv_equal(src, "@false"))
+        kind = TOK_FALSE;
+
+    da_append(ta, token_create(kind, src, pos));
+    return i;
 }
 
 // Tokenize the source.
@@ -71,7 +149,7 @@ bool tokenize(TokenArray *ta, StringView src)
     size_t i = 0;
     while (i < src.len)
     {
-        TokenKind kind = token_kind_get(src, i);
+        TokenKind kind = token_kind_get(sv_slice(src, .from=i));
 
         switch (kind)
         {
@@ -86,47 +164,16 @@ bool tokenize(TokenArray *ta, StringView src)
 
             case TOK_DIGIT:
             case TOK_ALPHA:
-                String sb;
-                str_init(&sb);
-
-                size_t start = i;
-                for (;;)
-                {
-                    bool end = false;
-                    TokenKind new_kind = token_kind_get(src, i);
-                    switch (new_kind)
-                    {
-                        case TOK_ALPHA:
-                            kind = TOK_ALNUM;
-                            // fallthrough
-                        case TOK_DIGIT:
-                            str_append(&sb, src.data[i]);
-                            // fallthrough
-                        case TOK_UNDER:
-                            i++;
-                            break;
-
-                        default:
-                            end = true;
-                            break;
-                    }
-                    if (end) break;
-                }
-
-                da_append(ta, token_create(kind, SV(sb), start));
+                i += build_number_token(ta, sv_slice(src, .from=i), i);
                 break;
 
-            case TOK_EQ:
-            case TOK_NEQ:
-            case TOK_LEQ:
-            case TOK_GEQ:
-                da_append(ta, token_create(kind, SV(""), i));
-                i += 2;
+            case TOK_AT:
+                i += build_id_token(ta, sv_slice(src, .from=i), i);
                 break;
 
             default:
                 da_append(ta, token_create(kind, SV(""), i));
-                i++;
+                i += token_len(kind);
                 break;
         }
     }

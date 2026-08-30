@@ -110,6 +110,8 @@ static size_t build_number_token(TokenArray *ta, StringView src, size_t pos)
 // Construct an identifier and return the length.
 static size_t build_id_token(TokenArray *ta, StringView src, size_t pos)
 {
+    TokenKind kind = TOK_ID;
+
     size_t i = 1;
     for (; i < src.len; i++)
     {
@@ -121,6 +123,10 @@ static size_t build_id_token(TokenArray *ta, StringView src, size_t pos)
             case TOK_UNDER:
                 break;
 
+            case TOK_AT:
+                kind = TOK_LAST;
+                i++;
+                // fallthrough
             default:
                 end = true;
                 break;
@@ -128,8 +134,6 @@ static size_t build_id_token(TokenArray *ta, StringView src, size_t pos)
         if (end) break;
     }
     src = sv_slice(src, .to=i);
-
-    TokenKind kind = TOK_ID;
 
     if (sv_equal(src, "@true"))
         kind = TOK_TRUE;

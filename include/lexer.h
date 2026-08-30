@@ -42,7 +42,8 @@
     X(TOK_ASSIGN,  "=") \
 \
     X(TOK_TRUE,    "@true") \
-    X(TOK_FALSE,   "@false")
+    X(TOK_FALSE,   "@false") \
+    X(TOK_LAST,    "@@")
 
 #define AS_ENUM(name, _) name,
 #define AS_STR(name, s)  [name] = (s),

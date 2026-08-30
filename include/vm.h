@@ -75,6 +75,7 @@ typedef struct
     unsigned long base;
     TokenArray *ta;
     size_t pos;
+    Value *last;
     Env *env;
 } VM;
 

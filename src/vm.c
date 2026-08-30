@@ -180,6 +180,7 @@ void vm_init(VM *v)
     v->env = malloc(sizeof(Env));
     da_init(v->env);
     vm_enter(v);
+    v->last = malloc(sizeof(Value));
 }
 
 void vm_reset(VM *v)
@@ -192,6 +193,8 @@ void vm_reset(VM *v)
         scope_free(da_at(v->env, i));
     }
     da_reset(v->env);
+    free(v->last);
+    v->last = NULL;
 }
 
 // Free a VM.
@@ -207,6 +210,8 @@ void vm_free(VM *v)
     }
     da_free(v->env);
     free(v->env);
+    free(v->last);
+    v->last = NULL;
 }
 
 #define AT_OR_LAST(v, p) (p) < (v)->ta->len ? (p) : (v)->ta->len-1
@@ -504,6 +509,12 @@ static bool try_eval_builtin(VM *v, Value *out)
     else if (t.kind == TOK_FALSE)
         value_bool(out, false);
 
+    else if (t.kind == TOK_LAST)
+    {
+        if (v->last)
+            value_set(out, v->last);
+    }
+
     else
         return false;
 
@@ -722,6 +733,8 @@ bool vm_evaluate(VM *v, StringView src, Value *out)
 
     if (vm_token(v).kind != TOK_EOF)
         return value_errorf(out, vm_token(v).pos, "Expected operator");
+
+    value_set(v->last, out);
 
     return true;
 }

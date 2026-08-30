@@ -29,8 +29,7 @@ void vm_value_free(Value *v)
             break;
 
         case VAL_ERROR:
-            if (v->as.error.msg)
-                free(v->as.error.msg);
+            str_free(&v->as.error.msg);
             break;
 
         default:
@@ -57,7 +56,9 @@ static void value_set(Value *v, const Value *from)
 
         case VAL_ERROR:
             v->as.error.pos = from->as.error.pos;
-            v->as.error.msg = strdup(from->as.error.msg);
+            const String *s = &from->as.error.msg;
+            str_clone(&v->as.error.msg, s);
+            break;
             break;
     }
 }
@@ -85,21 +86,12 @@ static bool value_errorf(Value *v, size_t pos, const char *fmt, ...)
 
     v->kind = VAL_ERROR;
     v->as.error.pos = pos;
+    str_init(&v->as.error.msg);
 
-    va_list args, copy;
+    va_list args;
     va_start(args, fmt);
-    va_copy(copy, args);
 
-    int len = vsnprintf(NULL, 0, fmt, copy);
-    va_end(copy);
-
-    if (len > 0)
-    {
-        v->as.error.msg = malloc(len+1);
-        assert(v->as.error.msg);
-
-        vsnprintf(v->as.error.msg, len+1, fmt, args);
-    }
+    str_appendvf(&v->as.error.msg, fmt, args);
 
     va_end(args);
     return false;
@@ -727,7 +719,7 @@ void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
                 str_append(sb, " ");
 
             if (ctx->use_color) str_appendf(sb, AFMT_BOLD ACOLOR_MAGENTA);
-            str_appendf(sb, "^ %s", v->as.error.msg);
+            str_appendf(sb, "^ "SV_FMT, SV_ARG(SV(v->as.error.msg)));
             if (ctx->use_color) str_appendf(sb, AFMT_RESET);
             break;
 

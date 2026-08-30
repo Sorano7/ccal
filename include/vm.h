@@ -22,12 +22,18 @@ typedef struct
         struct
         {
             size_t pos;
-            char *msg;
+            String msg;
         } error;
 
         mpq_t number;
 
         bool boolean;
+
+        struct
+        {
+            StringView param;
+            TokenArray *body;
+        } formula;
     } as;
 } Value;
 

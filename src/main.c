@@ -47,6 +47,46 @@ void repl_set_param_value(StringView s, unsigned long *v)
     *v = val;
 }
 
+void repl_handle_set_command(VM *vm, RenderCtx *ctx, StringView src)
+{
+    StringView param = sv_split(&src, '=');
+    param = sv_trim(param);
+
+    if (param.len == 0)
+    {
+        printf("missing option\n");
+    }
+    else if (sv_equal(param, "dec") || sv_equal(param, "decimal"))
+    {
+        ctx->num_form = NUMBER_DECIMAL;
+        printf("output form: decimal\n");
+    }
+    else if (sv_equal(param, "rat") || sv_equal(param, "rational"))
+    {
+        ctx->num_form = NUMBER_RATIONAL;
+        printf("output form: rational\n");
+    }
+    else if (sv_equal(param, "ob") || sv_equal(param, "obase"))
+    {
+        repl_set_param_value(src, &ctx->base);
+        printf("output base: %lu\n", ctx->base);
+    }
+    else if (sv_equal(param, "ib") || sv_equal(param, "ibase"))
+    {
+        repl_set_param_value(src, &vm->base);
+        printf("input base: %lu\n", vm->base);
+    }
+    else if (sv_equal(param, "tr") || sv_equal(param, "truncate"))
+    {
+        repl_set_param_value(src, &ctx->max_digits);
+        printf("truncate at: %lu\n", ctx->max_digits);
+    }
+    else
+    {
+        printf("unknown option\n");
+    }
+}
+
 bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
 {
     if (ctx->use_color) printf(ACOLOR_CYAN);
@@ -65,44 +105,17 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
     {
         printf(repl_help);
     }
+    else if (sv_equal(cmd, "e") || sv_equal(cmd, "env"))
+    {
+        String sb;
+        str_init(&sb);
+        vm_env_render(vm, &sb, ctx);
+        printf(SV_FMT, SV_ARG(SV(sb)));
+        str_free(&sb);
+    }
     else if (sv_equal(cmd, "s") || sv_equal(cmd, "set"))
     {
-        StringView param = sv_split(&src, '=');
-        param = sv_trim(param);
-
-        if (param.len == 0)
-        {
-            printf("missing option\n");
-        }
-        else if (sv_equal(param, "dec") || sv_equal(param, "decimal"))
-        {
-            ctx->num_form = NUMBER_DECIMAL;
-            printf("output form: decimal\n");
-        }
-        else if (sv_equal(param, "rat") || sv_equal(param, "rational"))
-        {
-            ctx->num_form = NUMBER_RATIONAL;
-            printf("output form: rational\n");
-        }
-        else if (sv_equal(param, "ob") || sv_equal(param, "obase"))
-        {
-            repl_set_param_value(src, &ctx->base);
-            printf("output base: %lu\n", ctx->base);
-        }
-        else if (sv_equal(param, "ib") || sv_equal(param, "ibase"))
-        {
-            repl_set_param_value(src, &vm->base);
-            printf("input base: %lu\n", vm->base);
-        }
-        else if (sv_equal(param, "tr") || sv_equal(param, "truncate"))
-        {
-            repl_set_param_value(src, &ctx->max_digits);
-            printf("truncate at: %lu\n", ctx->max_digits);
-        }
-        else
-        {
-            printf("unknown option\n");
-        }
+        repl_handle_set_command(vm, ctx, src);
     }
     else
     {

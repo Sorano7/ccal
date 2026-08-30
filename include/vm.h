@@ -28,24 +28,28 @@ typedef struct
         mpq_t number;
 
         bool boolean;
-
-        struct
-        {
-            StringView param;
-            TokenArray *body;
-        } formula;
     } as;
 } Value;
 
+// A symbol to value binding.
 typedef struct
 {
-    StringView id;
+    String *id;
     Value value;
 } Symbol;
 
+// An environment scope.
 typedef struct
 {
     Symbol *data;
+    size_t len;
+    size_t cap;
+} Scope;
+
+// An array of scope.
+typedef struct
+{
+    Scope **data;
     size_t len;
     size_t cap;
 } Env;
@@ -71,7 +75,7 @@ typedef struct
     unsigned long base;
     TokenArray *ta;
     size_t pos;
-    Env *scope;
+    Env *env;
 } VM;
 
 void vm_init(VM *v);
@@ -81,5 +85,7 @@ void vm_free(VM *v);
 bool vm_evaluate(VM *v, StringView src, Value *out);
 void vm_value_render(Value *v, String *sb, RenderCtx *ctx);
 void vm_value_free(Value *v);
+
+void vm_env_render(VM *v, String *sb, RenderCtx *ctx);
 
 #endif

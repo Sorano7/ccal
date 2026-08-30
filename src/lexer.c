@@ -172,8 +172,9 @@ bool tokenize(TokenArray *ta, StringView src)
                 break;
 
             default:
-                da_append(ta, token_create(kind, SV(""), i));
-                i += token_len(kind);
+                size_t len = token_len(kind);
+                da_append(ta, token_create(kind, sv_slice(src, .from=i, .to=i+len), i));
+                i += len;
                 break;
         }
     }

@@ -35,32 +35,7 @@ void vm_value_free(Value *v)
         default:
             break;
     }
-}
-
-// Set a value from another value.
-static void value_set(Value *v, const Value *from)
-{
-    v->kind = from->kind;
-    switch (v->kind)
-    {
-        case VAL_VOID:
-            break;
-
-        case VAL_NUMBER:
-            mpq_set(v->as.number, from->as.number);
-            break;
-
-        case VAL_BOOL:
-            v->as.boolean = from->as.boolean;
-            break;
-
-        case VAL_ERROR:
-            v->as.error.pos = from->as.error.pos;
-            const String *s = &from->as.error.msg;
-            str_clone(&v->as.error.msg, s);
-            break;
-            break;
-    }
+    memset(v, 0, sizeof(*v));
 }
 
 // Intializes a number value.
@@ -97,15 +72,44 @@ static bool value_errorf(Value *v, size_t pos, const char *fmt, ...)
     return false;
 }
 
+// Set a value from another value.
+static void value_set(Value *v, const Value *from)
+{
+    switch (from->kind)
+    {
+        case VAL_VOID:
+            v->kind = VAL_VOID;
+            break;
+
+        case VAL_NUMBER:
+            value_number(v);
+            mpq_set(v->as.number, from->as.number);
+            mpq_canonicalize(v->as.number);
+            break;
+
+        case VAL_BOOL:
+            value_bool(v, from->as.boolean);
+            break;
+
+        case VAL_ERROR:
+            StringView s = SV(from->as.error.msg);
+            value_errorf(v, from->as.error.pos, SV_FMT, SV_ARG(SV(s)));
+            break;
+    }
+}
+
 // Operator precedence levels.
 typedef enum
 {
     PREC_PRIMARY,
+
     PREC_EQUALITY,
     PREC_COMPARISON,
+
     PREC_SUM,
     PREC_PRODUCT,
     PREC_POWER,
+
     PREC_PREFIX,
     PREC_BASE,
 } OpPrec;
@@ -141,14 +145,41 @@ static OpPrec token_get_prec(Token t)
     }
 }
 
+static void scope_free(Scope *s)
+{
+    DA_FOR(s, i)
+    {
+        Symbol sym = da_at(s, i);
+        str_free(sym.id);
+        free(sym.id);
+        vm_value_free(&sym.value);
+    }
+    da_free(s);
+}
+
+static void vm_enter(VM *v)
+{
+    Scope *s = malloc(sizeof(Scope));
+    da_init(s);
+    da_append(v->env, s);
+}
+
+static void vm_leave(VM *v)
+{
+    Scope *s = da_last(v->env);
+    scope_free(s);
+    v->env->len--;
+}
+
 // Initialize a VM with default base;
 void vm_init(VM *v)
 {
     v->base = BASE_DEFAULT;
     v->ta = NULL;
     v->pos = 0;
-    v->scope = malloc(sizeof(Env));
-    da_init(v->scope);
+    v->env = malloc(sizeof(Env));
+    da_init(v->env);
+    vm_enter(v);
 }
 
 void vm_reset(VM *v)
@@ -156,7 +187,11 @@ void vm_reset(VM *v)
     v->base = BASE_DEFAULT;
     v->ta = NULL;
     v->pos = 0;
-    da_reset(v->scope);
+    for (size_t i = 1; i > v->env->len; i++)
+    {
+        scope_free(da_at(v->env, i));
+    }
+    da_reset(v->env);
 }
 
 // Free a VM.
@@ -166,8 +201,12 @@ void vm_free(VM *v)
         da_free(v->ta);
     v->pos = 0;
     v->base = 0;
-    da_free(v->scope);
-    free(v->scope);
+    DA_FOR(v->env, i)
+    {
+        scope_free(da_at(v->env, i));
+    }
+    da_free(v->env);
+    free(v->env);
 }
 
 #define AT_OR_LAST(v, p) (p) < (v)->ta->len ? (p) : (v)->ta->len-1
@@ -399,26 +438,30 @@ static bool eval_neg(VM *v, Value *out)
 // Assign a symbol to the current scope.
 static void vm_symbol_set(VM *v, StringView id, const Value *value)
 {
-    DA_FOR(v->scope, i)
+    Scope *scope = da_last(v->env);
+    DA_FOR(scope, i)
     {
-        Symbol existing = da_at(v->scope, i);
-        if (sv_equal(existing.id, id))
+        Symbol *existing = &da_at(scope, i);
+        if (sv_equal(existing->id, id))
         {
-            value_set(&existing.value, value);
+            vm_value_free(&existing->value);
+            value_set(&existing->value, value);
             return;
         }
     }
     Symbol s = {0};
-    s.id = id;
+    s.id = malloc(sizeof(String));
+    str_init_with(s.id, id);
     value_set(&s.value, value);
-    da_append(v->scope, s);
+    da_append(scope, s);
 }
 
 static bool vm_symbol_get(VM *v, StringView id, Value *out)
 {
-    DA_FOR(v->scope, i)
+    Scope *scope = da_last(v->env);
+    DA_FOR(scope, i)
     {
-        Symbol existing = da_at(v->scope, i);
+        Symbol existing = da_at(scope, i);
         if (sv_equal(existing.id, id))
         {
             value_set(out, &existing.value);
@@ -603,7 +646,9 @@ static bool eval_bool_infix(Value *l, Token op, Value *r)
 // Evaluate a left denotation expression.
 static bool eval_led(VM *v, int prec, Value *left)
 {
-    Token t = vm_token(v);
+    bool ok = true;
+
+    Token infix = vm_token(v);
     v->pos++;
 
     size_t r_tok_pos = v->pos;
@@ -611,25 +656,37 @@ static bool eval_led(VM *v, int prec, Value *left)
     if (!eval_expr(v, prec, &right))
     {
         value_set(left, &right);
-        vm_value_free(&right);
-        return false;
+        ok = false;
+        goto cleanup;
     }
 
     if (left->kind != right.kind)
-        return value_errorf(left, t.pos, 
+    {
+        ok = value_errorf(left, infix.pos, 
                 "Invalid operation between %s and %s", 
                 vk_to_str[left->kind], vk_to_str[right.kind]);
+        goto cleanup;
+    }
 
     switch (left->kind)
     {
-        case VAL_VOID:    assert(!"void value reached eval_led");
-        case VAL_ERROR:   return false;
-        case VAL_NUMBER:  return eval_number_infix(left, t, &right, r_tok_pos);
-        case VAL_BOOL:    return eval_bool_infix(left, t, &right);
+        case VAL_ERROR:
+            ok = false; 
+            break;
+        case VAL_NUMBER:
+            ok = eval_number_infix(left, infix, &right, r_tok_pos);
+            break;
+        case VAL_BOOL:
+            ok = eval_bool_infix(left, infix, &right);
+            break;
+        default:
+            ok = value_errorf(left, infix.pos, "Unknown operation");
+            break;
     }
 
+cleanup:
     vm_value_free(&right);
-    return true;
+    return ok;
 }
 
 // Evaluate an expression.
@@ -707,30 +764,49 @@ static void number_value_render(Value *v, String *sb, RenderCtx *ctx)
 // The render may contain newlines but will not have a final newline.
 void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
 {
+    if (v->kind == VAL_ERROR)
+    {
+        str_appendf(sb, SV_FMT"\n", SV_ARG(ctx->src));
+        for (size_t i = 0; i < v->as.error.pos; i++)
+            str_append(sb, " ");
+
+        if (ctx->use_color) str_appendf(sb, AFMT_BOLD ACOLOR_MAGENTA);
+        str_appendf(sb, "^ "SV_FMT, SV_ARG(SV(v->as.error.msg)));
+        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+        return;
+    }
+    if (v->kind == VAL_NUMBER)
+    {
+        number_value_render(v, sb, ctx);
+        return;
+    }
+
+    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
     switch (v->kind)
     {
-        case VAL_VOID:
-            str_append(sb, "<void>");
-            break;
-
-        case VAL_ERROR:
-            str_appendf(sb, SV_FMT"\n", SV_ARG(ctx->src));
-            for (size_t i = 0; i < v->as.error.pos; i++)
-                str_append(sb, " ");
-
-            if (ctx->use_color) str_appendf(sb, AFMT_BOLD ACOLOR_MAGENTA);
-            str_appendf(sb, "^ "SV_FMT, SV_ARG(SV(v->as.error.msg)));
-            if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-            break;
-
-        case VAL_NUMBER:
-            number_value_render(v, sb, ctx);
-            break;
-
         case VAL_BOOL:
-            if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
             str_appendf(sb, "@%s", v->as.boolean ? "true" : "false");
-            if (ctx->use_color) str_appendf(sb, AFMT_RESET);
             break;
+
+        default:
+            break;
+    }
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+}
+
+void vm_env_render(VM *v, String *sb, RenderCtx *ctx)
+{
+    DA_FOR(v->env, i)
+    {
+        str_appendf(sb, "Scope (%zu)\n", i);
+        Scope *scope = da_at(v->env, i);
+        DA_FOR(scope, j)
+        {
+            Symbol sym = da_at(scope, j);
+            str_appendf(sb, "    "SV_FMT" = ", SV_ARG(SV(sym.id)));
+            vm_value_render(&sym.value, sb, ctx);
+            str_append(sb, "\n");
+        }
+        str_append(sb, "\n");
     }
 }

@@ -37,7 +37,7 @@
 } while (0)
 
 #define da_at(da, i)   (da)->data[(i)]
-#define da_last(da, i) (da)->data[(da)->len-1]
+#define da_last(da) (da)->data[(da)->len-1]
 
 #define DA_FOR(da, i) for (size_t i = 0; i < (da)->len; i++)
 

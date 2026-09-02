@@ -154,7 +154,7 @@ void repl_start(VM *vm, RenderCtx *ctx)
             continue;
         }
 
-        vm_evaluate(vm, src, &value);
+        vm_run(vm, src, &value);
 
         ctx->src = src;
         vm_value_render(&value, &out, ctx);
@@ -175,7 +175,7 @@ int run_oneshot(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
 
     Value value = {0};
 
-    bool ok = vm_evaluate(vm, src, &value);
+    bool ok = vm_run(vm, src, &value);
     ctx->src =src;
     vm_value_render(&value, &s, ctx);
     fprintf(fdout, SV_FMT"\n", SV_ARG(SV(s)));

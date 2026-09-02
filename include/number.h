@@ -5,6 +5,9 @@
 #include <gmp.h>
 #include "cut.h"
 
+#define BASE_DEFAULT 10
+#define BASE_MAX ULONG_MAX
+
 typedef enum
 {
     DIGIT_FMT_ALNUM,

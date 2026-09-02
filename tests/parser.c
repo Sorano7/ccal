@@ -1,0 +1,294 @@
+#include "cut.h"
+#include "parser.h"
+
+#define PARSE(e, src, b) do { \
+    if (e) expr_destroy(&e); \
+    (e) = parse(SV(src), (b)); \
+    if (is_error(e)) \
+        CUT_FATAL("failed to parse '"SV_FMT"': "SV_FMT, \
+                SV_ARG(SV(src)), \
+                SV_ARG((e)->as.err)); \
+} while (0)
+
+#define PARSE_FAIL(src, b) do { \
+    Expr *e = parse(SV(src), (b)); \
+    if (!is_error(e)) \
+        CUT_FATAL("did not failed on parsing '"SV_FMT"'", SV_ARG(SV(src))); \
+    expr_destroy(&e); \
+} while (0)
+
+#define NUM_EQ(e, n, d) do { \
+    CUT_MUST((e)->kind == EXPR_NUMBER); \
+    CUT_CHECK(mpq_cmp_ui((e)->as.number, (n), (d)) == 0); \
+} while (0)
+
+TEST(parse_alnum_integer)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "123", 10);
+    NUM_EQ(e, 123, 1);
+
+    PARSE(e, "1A3", 16);
+    NUM_EQ(e, 419, 1);
+
+    PARSE(e, "ff", 16);
+    NUM_EQ(e, 255, 1);
+
+    expr_destroy(&e);
+}
+
+TEST(alnum_integer_digit_must_be_in_bounds)
+{
+    PARSE_FAIL("1234", 4);
+    PARSE_FAIL("fG", 16);
+    PARSE_FAIL("z", 60);
+}
+
+TEST(parse_digit_list_integer)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "[1,2,3]", 10);
+    NUM_EQ(e, 123, 1);
+
+    PARSE(e, "[1, 10, 3]", 16);
+    NUM_EQ(e, 419, 1);
+
+    expr_destroy(&e);
+}
+
+TEST(parse_decimal)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "0.25", 10);
+    NUM_EQ(e, 1, 4);
+
+    PARSE(e, "[0].([3])", 10);
+    NUM_EQ(e, 1, 3);
+
+    PARSE(e, "1.1(6)", 10);
+    NUM_EQ(e, 7, 6);
+
+    expr_destroy(&e);
+}
+
+TEST(underscore_ignored_in_literals)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "1_000_000", 10);
+    NUM_EQ(e, 1000000, 1);
+
+    expr_destroy(&e);
+}
+
+TEST(parse_identifier)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "@foo", 10);
+    CUT_CHECK(e->kind == EXPR_IDENT);
+    CUT_CHECK(sv_equal(e->as.id, "@foo"));
+
+    expr_destroy(&e);
+}
+
+TEST(invalid_token_is_rejected)
+{
+    PARSE_FAIL("`", 10);
+    PARSE_FAIL("|", 10);
+    PARSE_FAIL("\"", 10);
+}
+
+TEST(must_not_contain_trailing_expressions)
+{
+    PARSE_FAIL("123 123", 10);
+    PARSE_FAIL("123 [1,2,3]", 10);
+    PARSE_FAIL("123 (-123)", 10);
+}
+
+TEST(infix_must_be_complete)
+{
+    PARSE_FAIL("12 + ", 10);
+    PARSE_FAIL("* 34", 10);
+}
+
+TEST(digit_list_syntax_must_be_complete)
+{
+    PARSE_FAIL("[", 10);
+    PARSE_FAIL("[]", 10);
+    PARSE_FAIL("[,", 10);
+    PARSE_FAIL("[1, 2", 10);
+    PARSE_FAIL("[1, 2,]", 10);
+}
+
+TEST(decimal_syntax_must_be_complete)
+{
+    PARSE_FAIL("12.", 10);
+    // Omitting 0 is not supported.
+    PARSE_FAIL(".123", 10);
+    PARSE_FAIL(".", 10);
+    PARSE_FAIL("1.()", 10);
+}
+
+TEST(decimal_mixed_format_is_invalid)
+{
+    PARSE_FAIL("12.[3,4]", 10);
+    PARSE_FAIL("[1,2].34([5,6])", 10);
+}
+
+TEST(group_must_be_closed)
+{
+
+    PARSE_FAIL("1 + (", 10);
+    PARSE_FAIL("1 + (2", 10);
+}
+
+TEST(default_base_is_used_for_untagged_literal)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "10", 10);
+    NUM_EQ(e, 10, 1);
+
+    PARSE(e, "10", 8);
+    NUM_EQ(e, 8, 1);
+
+    PARSE(e, "10", 62);
+    NUM_EQ(e, 62, 1);
+
+    expr_destroy(&e);
+}
+
+TEST(base_tag_binds_to_one_expression)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "16#10", 10);
+    NUM_EQ(e, 16, 1);
+
+    PARSE(e, "16#10 + 10", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    NUM_EQ(e->as.infix.left, 16, 1);
+    NUM_EQ(e->as.infix.right, 10, 1);
+
+    PARSE(e, "10 + 16#10", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    NUM_EQ(e->as.infix.left, 10, 1);
+    NUM_EQ(e->as.infix.right, 16, 1);
+
+    PARSE(e, "16#(10 + 10)", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    NUM_EQ(e->as.infix.left, 16, 1);
+    NUM_EQ(e->as.infix.right, 16, 1);
+
+    PARSE_FAIL("16#-10", 10);
+
+    expr_destroy(&e);
+}
+
+TEST(parse_infix_arithmetics)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "12 + 34", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_ADD);
+    NUM_EQ(e->as.infix.left, 12, 1);
+    NUM_EQ(e->as.infix.right, 34, 1);
+
+    PARSE(e, "100 - 75", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_SUB);
+    NUM_EQ(e->as.infix.left, 100, 1);
+    NUM_EQ(e->as.infix.right, 75, 1);
+
+    PARSE(e, "2 * 30", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_MUL);
+    NUM_EQ(e->as.infix.left, 2, 1);
+    NUM_EQ(e->as.infix.right, 30, 1);
+
+    PARSE(e, "5 / 7", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_DIV);
+    NUM_EQ(e->as.infix.left, 5, 1);
+    NUM_EQ(e->as.infix.right, 7, 1);
+
+    expr_destroy(&e);
+}
+
+TEST(parse_infix_comparison_and_equality)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "1 < 2", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_LT);
+
+    PARSE(e, "1 <= 2", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_LEQ);
+
+    PARSE(e, "1 > 2", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_GT);
+
+    PARSE(e, "1 >= 2", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_GEQ);
+
+    PARSE(e, "1 == 2", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_EQ);
+
+    PARSE(e, "1 != 2", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_NEQ);
+
+    expr_destroy(&e);
+}
+
+TEST(infix_has_correct_binding_power)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "20 * 3 + 1", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_ADD);
+    NUM_EQ(e->as.infix.right, 1, 1);
+
+    Expr *e2 = e->as.infix.left;
+    CUT_MUST(e2->kind == EXPR_INFIX);
+    CUT_CHECK(e2->as.infix.op == OP_MUL);
+    NUM_EQ(e2->as.infix.left, 20, 1);
+    NUM_EQ(e2->as.infix.right, 3, 1);
+
+    PARSE(e, "2 + 3 * 4", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_ADD);
+    NUM_EQ(e->as.infix.left, 2, 1);
+
+    e2 = e->as.infix.right;
+    CUT_MUST(e2->kind == EXPR_INFIX);
+    CUT_CHECK(e2->as.infix.op == OP_MUL);
+    NUM_EQ(e2->as.infix.left, 3, 1);
+    NUM_EQ(e2->as.infix.right, 4, 1);
+
+    PARSE(e, "(2 + 3) * 4", 10);
+    CUT_MUST(e->kind == EXPR_INFIX);
+    CUT_CHECK(e->as.infix.op == OP_MUL);
+    NUM_EQ(e->as.infix.right, 4, 1);
+
+    e2 = e->as.infix.left;
+    CUT_MUST(e2->kind == EXPR_INFIX);
+    CUT_CHECK(e2->as.infix.op == OP_ADD);
+    NUM_EQ(e2->as.infix.left, 2, 1);
+    NUM_EQ(e2->as.infix.right, 3, 1);
+
+    expr_destroy(&e);
+}
+
+

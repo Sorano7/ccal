@@ -3,7 +3,7 @@
 
 #include "cut.h"
 
-#define FIXTURE_START() \
+#define START() \
     String sb; str_init(&sb); \
     RenderCtx ctx = { \
         .max_digits=50, \
@@ -16,7 +16,7 @@
     VM vm; vm_init(&vm); \
     Value val = {0};
 
-#define FIXTURE_END() \
+#define END() \
     str_free(&sb); \
     vm_value_free(&val);
 
@@ -52,24 +52,38 @@
 } while (0)
 
 
-/************************************
- * Value Rendering
- ************************************/
+TEST(basic_arithmetics)
+{
+    START();
+        EVAL("2 + 3 * 4", &val);
+        NUM_EQ(&val, 14, 1);
+
+        EVAL("(2 + 3) * 4", &val);
+        NUM_EQ(&val, 20, 1);
+
+        EVAL("2 ^ 10", &val);
+        NUM_EQ(&val, 1024, 1);
+
+        // (255 + 10*15) - 35 + (5/6 * 6) - (2/3 * 3)
+        EVAL("16#(ff + 2#1010 * 8#17) - 36#z + 0.8(3) * 6 - 0.(6) * 3", &val);
+        NUM_EQ(&val, 373, 1);
+    END();
+}
 
 TEST(boolean_render_correct)
 {
-    FIXTURE_START();
+    START();
         EVAL_RENDER("999 * 0.5 < 666 * 0.9", &val);
         CUT_CHECK(sv_equal(sb, "@true"));
 
         EVAL_RENDER("999 * 0.5 > 666 * 0.9", &val);
         CUT_CHECK(sv_equal(sb, "@false"));
-    FIXTURE_END();
+    END();
 }
 
 TEST(integer_render_correct)
 {
-    FIXTURE_START();
+    START();
         EVAL_RENDER("123", &val);
         CUT_CHECK(sv_equal(sb, "123"));
 
@@ -80,23 +94,23 @@ TEST(integer_render_correct)
         EVAL_RENDER("255", &val);
         // GMP defaults to lowercase for base <= 36
         CUT_CHECK(sv_equal(sb, "16#ff"));
-    FIXTURE_END();
+    END();
 }
 
 TEST(rational_render_correct)
 {
-    FIXTURE_START();
+    START();
         EVAL_RENDER("0.3", &val);
         CUT_CHECK(sv_equal(sb, "3/10"));
 
         EVAL_RENDER("20 / 30", &val);
         CUT_CHECK(sv_equal(sb, "2/3"));
-    FIXTURE_END();
+    END();
 }
 
 TEST(decimal_render_correct)
 {
-    FIXTURE_START();
+    START();
         ctx.num_form = NUMBER_DECIMAL;
         EVAL_RENDER("0.3", &val);
         CUT_CHECK(sv_equal(sb, "0.3"));
@@ -106,12 +120,12 @@ TEST(decimal_render_correct)
 
         EVAL_RENDER("5/6", &val);
         CUT_CHECK(sv_equal(sb, "0.8(3)"));
-    FIXTURE_END();
+    END();
 }
 
 TEST(variable_assign_and_evaluate)
 {
-    FIXTURE_START();
+    START();
         EVAL("@x = 1", &val);
         NUM_EQ(&val, 1, 1);
 
@@ -123,42 +137,42 @@ TEST(variable_assign_and_evaluate)
 
         EVAL("@x", &val);
         NUM_EQ(&val, 200, 1);
-    FIXTURE_END();
+    END();
 }
 
 TEST(variable_dynamic_typing)
 {
-    FIXTURE_START();
+    START();
         EVAL("@x = 1", &val);
         NUM_EQ(&val, 1, 1);
 
         EVAL("@x = @x > 1", &val);
         BOOL_EQ(&val, false);
-    FIXTURE_END();
+    END();
 }
 
 TEST(cannot_access_unknown_variable)
 {
-    FIXTURE_START();
+    START();
         EVAL_FAIL("@x");
-    FIXTURE_END();
+    END();
 }
 
 TEST(builtin_constants_eval)
 {
-    FIXTURE_START();
+    START();
         EVAL("@true", &val);
         BOOL_EQ(&val, true);
 
         EVAL("@false", &val);
         BOOL_EQ(&val, false);
-    FIXTURE_END();
+    END();
 }
 
 TEST(cannot_assign_to_builtin)
 {
-    FIXTURE_START();
+    START();
         EVAL_FAIL("@true = 1");
         EVAL_FAIL("@@ = @true");
-    FIXTURE_END();
+    END();
 }

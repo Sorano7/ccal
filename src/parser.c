@@ -40,7 +40,7 @@
 \
     X(TOK_AT,      "@") \
     X(TOK_ID,      "identifier") \
-    X(TOK_ASSIGN,  "=")
+    X(TOK_ASSIGN,  "=") \
 
 #define AS_ENUM(name, _) name,
 #define AS_STR(name, s)  [name] = (s),
@@ -247,6 +247,8 @@ typedef enum
 {
     PREC_PRIMARY,
 
+    PREC_ASSIGN,
+
     PREC_EQUALITY,
     PREC_COMPARISON,
 
@@ -284,6 +286,9 @@ static OpPrec token_prec(Token t)
         case TOK_CARET:
             return PREC_POWER;
 
+        case TOK_ASSIGN:
+            return PREC_ASSIGN;
+
         default:
             return PREC_PRIMARY;
     }
@@ -307,8 +312,30 @@ static Operator token_to_op(Token t)
         case TOK_STAR:   return OP_MUL;
         case TOK_SLASH:  return OP_DIV;
         case TOK_CARET:  return OP_POW;
+        case TOK_ASSIGN: return OP_ASSIGN;
 
         default:         return OP_NIL;
+    }
+}
+
+// Return whether the operator is right associative.
+static bool is_right_associative(Operator op)
+{
+    switch (op)
+    {
+        case OP_EQ:
+        case OP_NEQ:
+        case OP_LT:
+        case OP_LEQ:
+        case OP_GT:
+        case OP_GEQ:
+        case OP_POW:
+        case OP_NEG:
+        case OP_ASSIGN:
+            return true;
+
+        default:
+            return false;
     }
 }
 
@@ -526,20 +553,6 @@ static Expr *parse_neg(Parser *p)
     return expr_prefix(s, OP_NEG, e);
 }
 
-// Parse an assignment expression.
-static Expr *parse_assign(Parser *p)
-{
-    Span s = tspan(p);
-    Token id = token(p);
-    CONSUME_EXPECT(p, TOK_ID);
-    CONSUME_EXPECT(p, TOK_ASSIGN);
-
-    Expr *v = parse_expr(p, PREC_PRIMARY);
-    if (is_error(v)) return v;
-
-    return expr_assign(s, id.value, v);
-}
-
 // Parse an identifier
 static Expr *parse_ident(Parser *p)
 {
@@ -553,9 +566,6 @@ static Expr *parse_nud(Parser *p)
 {
     if (peek(p, 1).kind == TOK_HASH)
         return parse_base_tag(p);
-
-    if (peek(p, 1).kind == TOK_ASSIGN)
-        return parse_assign(p);
 
     if (is_alnum(p))
         return parse_number(p, DIGIT_FMT_ALNUM);
@@ -576,9 +586,21 @@ static Expr *parse_nud(Parser *p)
 static Expr *parse_led(Parser *p, int prec, Expr *left)
 {
     Operator op = token_to_op(token(p));
-    if (op == OP_NIL)
-        return expr_err(tspan(p), "Unknown operator");
+    switch (op)
+    {
+        case OP_NIL:
+            return expr_err(tspan(p), "Unknown operator");
+        case OP_ASSIGN:
+            if (left->kind != EXPR_IDENT)
+                return expr_err(tspan(p), "Expected identifier");
+            break;
+        default:
+            break;
+    }
     p->pos++;
+
+    if (is_right_associative(op))
+        prec--;
 
     Expr *right = parse_expr(p, prec);
     if (is_error(right))

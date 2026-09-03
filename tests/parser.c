@@ -5,15 +5,20 @@
     if (e) expr_destroy(&e); \
     (e) = parse(SV(src), (b)); \
     if (is_error(e)) \
-        CUT_FATAL("failed to parse '"SV_FMT"': "SV_FMT, \
-                SV_ARG(SV(src)), \
+        CUT_FATAL("failed to parse "#src": ", \
                 SV_ARG((e)->as.err)); \
+} while (0)
+
+#define EXPR_CHECK(got, want) do { \
+    Expr *__e = (want); \
+    CUT_CHECK(expr_equal((got), __e)); \
+    expr_destroy(&__e); \
 } while (0)
 
 #define PARSE_FAIL(src, b) do { \
     Expr *e = parse(SV(src), (b)); \
     if (!is_error(e)) \
-        CUT_FATAL("did not failed on parsing '"SV_FMT"'", SV_ARG(SV(src))); \
+        CUT_FATAL("did not failed on parsing "#src); \
     expr_destroy(&e); \
 } while (0)
 
@@ -170,19 +175,28 @@ TEST(base_tag_binds_to_one_expression)
     NUM_EQ(e, 16, 1);
 
     PARSE(e, "16#10 + 10", 10);
-    CUT_MUST(e->kind == EXPR_INFIX);
-    NUM_EQ(e->as.infix.left, 16, 1);
-    NUM_EQ(e->as.infix.right, 10, 1);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_number_ui((Span){0}, 16, 1),
+            OP_ADD,
+            expr_number_ui((Span){0}, 10, 1)
+        ));
 
     PARSE(e, "10 + 16#10", 10);
-    CUT_MUST(e->kind == EXPR_INFIX);
-    NUM_EQ(e->as.infix.left, 10, 1);
-    NUM_EQ(e->as.infix.right, 16, 1);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_number_ui((Span){0}, 10, 1),
+            OP_ADD,
+            expr_number_ui((Span){0}, 16, 1)
+        ));
 
     PARSE(e, "16#(10 + 10)", 10);
-    CUT_MUST(e->kind == EXPR_INFIX);
-    NUM_EQ(e->as.infix.left, 16, 1);
-    NUM_EQ(e->as.infix.right, 16, 1);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_number_ui((Span){0}, 16, 1),
+            OP_ADD,
+            expr_number_ui((Span){0}, 16, 1)
+        ));
 
     PARSE_FAIL("16#-10", 10);
 
@@ -194,28 +208,36 @@ TEST(parse_infix_arithmetics)
     Expr *e = NULL;
 
     PARSE(e, "12 + 34", 10);
-    CUT_MUST(e->kind == EXPR_INFIX);
-    CUT_CHECK(e->as.infix.op == OP_ADD);
-    NUM_EQ(e->as.infix.left, 12, 1);
-    NUM_EQ(e->as.infix.right, 34, 1);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_number_ui((Span){0}, 12, 1),
+            OP_ADD,
+            expr_number_ui((Span){0}, 34, 1)
+        ));
 
     PARSE(e, "100 - 75", 10);
-    CUT_MUST(e->kind == EXPR_INFIX);
-    CUT_CHECK(e->as.infix.op == OP_SUB);
-    NUM_EQ(e->as.infix.left, 100, 1);
-    NUM_EQ(e->as.infix.right, 75, 1);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_number_ui((Span){0}, 100, 1),
+            OP_SUB,
+            expr_number_ui((Span){0}, 75, 1)
+        ));
 
     PARSE(e, "2 * 30", 10);
-    CUT_MUST(e->kind == EXPR_INFIX);
-    CUT_CHECK(e->as.infix.op == OP_MUL);
-    NUM_EQ(e->as.infix.left, 2, 1);
-    NUM_EQ(e->as.infix.right, 30, 1);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_number_ui((Span){0}, 2, 1),
+            OP_MUL,
+            expr_number_ui((Span){0}, 30, 1)
+        ));
 
     PARSE(e, "5 / 7", 10);
-    CUT_MUST(e->kind == EXPR_INFIX);
-    CUT_CHECK(e->as.infix.op == OP_DIV);
-    NUM_EQ(e->as.infix.left, 5, 1);
-    NUM_EQ(e->as.infix.right, 7, 1);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_number_ui((Span){0}, 5, 1),
+            OP_DIV,
+            expr_number_ui((Span){0}, 7, 1)
+        ));
 
     expr_destroy(&e);
 }
@@ -256,39 +278,80 @@ TEST(infix_has_correct_binding_power)
     Expr *e = NULL;
 
     PARSE(e, "20 * 3 + 1", 10);
-    CUT_MUST(e->kind == EXPR_INFIX);
-    CUT_CHECK(e->as.infix.op == OP_ADD);
-    NUM_EQ(e->as.infix.right, 1, 1);
-
-    Expr *e2 = e->as.infix.left;
-    CUT_MUST(e2->kind == EXPR_INFIX);
-    CUT_CHECK(e2->as.infix.op == OP_MUL);
-    NUM_EQ(e2->as.infix.left, 20, 1);
-    NUM_EQ(e2->as.infix.right, 3, 1);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_infix(
+                expr_number_ui((Span){0}, 20, 1),
+                OP_MUL,
+                expr_number_ui((Span){0}, 3, 1)
+            ),
+            OP_ADD,
+            expr_number_ui((Span){0}, 1, 1)
+        ));
 
     PARSE(e, "2 + 3 * 4", 10);
-    CUT_MUST(e->kind == EXPR_INFIX);
-    CUT_CHECK(e->as.infix.op == OP_ADD);
-    NUM_EQ(e->as.infix.left, 2, 1);
-
-    e2 = e->as.infix.right;
-    CUT_MUST(e2->kind == EXPR_INFIX);
-    CUT_CHECK(e2->as.infix.op == OP_MUL);
-    NUM_EQ(e2->as.infix.left, 3, 1);
-    NUM_EQ(e2->as.infix.right, 4, 1);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_number_ui((Span){0}, 2, 1),
+            OP_ADD,
+            expr_infix(
+                expr_number_ui((Span){0}, 3, 1),
+                OP_MUL,
+                expr_number_ui((Span){0}, 4, 1)
+            )
+        ));
 
     PARSE(e, "(2 + 3) * 4", 10);
-    CUT_MUST(e->kind == EXPR_INFIX);
-    CUT_CHECK(e->as.infix.op == OP_MUL);
-    NUM_EQ(e->as.infix.right, 4, 1);
-
-    e2 = e->as.infix.left;
-    CUT_MUST(e2->kind == EXPR_INFIX);
-    CUT_CHECK(e2->as.infix.op == OP_ADD);
-    NUM_EQ(e2->as.infix.left, 2, 1);
-    NUM_EQ(e2->as.infix.right, 3, 1);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_infix(
+                expr_number_ui((Span){0}, 2, 1),
+                OP_ADD,
+                expr_number_ui((Span){0}, 3, 1)
+            ),
+            OP_MUL,
+            expr_number_ui((Span){0}, 4, 1)
+        ));
 
     expr_destroy(&e);
 }
 
+TEST(power_is_right_associative)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "2 ^ 3 ^ 2", 10);
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_number_ui((Span){0}, 2, 1),
+            OP_POW,
+            expr_infix(
+                expr_number_ui((Span){0}, 3, 1),
+                OP_POW,
+                expr_number_ui((Span){0}, 2, 1)
+            )
+        ));
+
+    expr_destroy(&e);
+}
+
+TEST(assign_is_right_associative_and_left_must_be_id)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "@x = @y = 20", 10);
+
+    EXPR_CHECK(e, 
+        expr_infix(
+            expr_id((Span){0}, SV("@x")),
+            OP_ASSIGN,
+            expr_infix(
+                expr_id((Span){0}, SV("@y")),
+                OP_ASSIGN,
+                expr_number_ui((Span){0}, 20, 1)
+            )
+        ));
+
+    expr_destroy(&e);
+}
 

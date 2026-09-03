@@ -245,19 +245,6 @@ static bool is_builtin(StringView id)
     return false;
 }
 
-// Evaluate an assignment expression.
-static bool eval_assign(VM *v, Expr *e, Value *out)
-{
-    Span s = {e->span.from, e->span.from + e->as.assign.id.len};
-
-    if (is_builtin(e->as.assign.id))
-        return errorf(out, s, "Cannot assign to builtin symbol");
-    if (!vm_eval_expr(v, e->as.assign.expr, out))
-        return false;
-    symbol_set(v, e->as.assign.id, out);
-    return true;
-}
-
 // Evaluate a prefix expression.
 static bool eval_prefix(VM *v, Expr *e, Value *out)
 {
@@ -357,9 +344,29 @@ static bool eval_bool_infix(Value *l, Expr *e, Value *r)
     return true;
 }
 
+// Evaluate an assignment infix operation.
+static bool eval_assign_infix(VM *v, Expr *e, Value *out)
+{
+    Expr *l = e->as.infix.left;
+
+    if (l->kind != EXPR_IDENT)
+        return errorf(out, l->span, "Expected identifier");
+    if (is_builtin(l->as.id))
+        return errorf(out, l->span, "Cannot assign to builtin identifier");
+
+    if (!vm_eval_expr(v, e->as.infix.right, out))
+        return false;
+
+    symbol_set(v, l->as.id, out);
+    return true;
+}
+
 // Evaluate an infix operation.
 static bool eval_infix(VM *v, Expr *e, Value *out)
 {
+    if (e->as.infix.op == OP_ASSIGN)
+        return eval_assign_infix(v, e, out);
+
     bool ok = false;
 
     if (!vm_eval_expr(v, e->as.infix.left, out))
@@ -411,7 +418,6 @@ bool vm_eval_expr(VM *v, Expr *e, Value *out)
         case EXPR_IDENT:  ok = eval_ident(v, e, out);  break;
         case EXPR_INFIX:  ok = eval_infix(v, e, out);  break;
         case EXPR_PREFIX: ok = eval_prefix(v, e, out); break;
-        case EXPR_ASSIGN: ok = eval_assign(v, e, out); break;
         default:          UNREACHABLE();
     }
 

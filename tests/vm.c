@@ -22,7 +22,8 @@
 
 #define EVAL(src, v) do { \
     if (!vm_run(&vm, SV(src), (v))) \
-        CUT_FATAL(SV_FMT, SV_ARG(SV(val.as.error))); \
+        CUT_FATAL("failed to parse "#src": "SV_FMT, \
+                SV_ARG(SV(val.as.error))); \
 } while (0)
 
 #define EVAL_RENDER(s, v) do { \
@@ -33,8 +34,8 @@
 } while (0)
 
 #define EVAL_FAIL(src) do { \
-    bool ok = vm_run(&vm, SV(src), &val); \
-    if (ok) CUT_ERROR(#src " did not fail"); \
+    if (vm_run(&vm, SV(src), &val)) \
+        CUT_FATAL("did not failed on parsing "#src); \
 } while (0)
 
 #define NUM_EQ(v, n, d) do { \

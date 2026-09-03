@@ -4,6 +4,7 @@
 
 const char *op_to_str[] = {OPS(AS_STR)};
 
+// Allocate an expression with kind and span.
 static Expr *expr_new(ExprKind kind, Span span)
 {
     Expr *e = malloc(sizeof(Expr));
@@ -15,6 +16,7 @@ static Expr *expr_new(ExprKind kind, Span span)
     return e;
 }
 
+// Free an expression recursively.
 void expr_free(Expr *e)
 {
     if (!e) return;
@@ -42,6 +44,7 @@ void expr_free(Expr *e)
     }
 }
 
+// Free an expression's content and itself.
 void expr_destroy(Expr **ep)
 {
     if (!ep || !*ep) return;
@@ -49,7 +52,7 @@ void expr_destroy(Expr **ep)
     free(*ep);
 }
 
-
+// Allocate an error expression with span and message.
 Expr *expr_err(Span span, const char *fmt, ...)
 {
     Expr *e = expr_new(EXPR_ERROR, span);
@@ -63,6 +66,7 @@ Expr *expr_err(Span span, const char *fmt, ...)
     return e;
 }
 
+// Allocate a number expression with span without setting a value.
 Expr *expr_number(Span span)
 {
     Expr *e = expr_new(EXPR_NUMBER, span);
@@ -70,6 +74,15 @@ Expr *expr_number(Span span)
     return e;
 }
 
+// Allocate a number expression with value.
+Expr *expr_number_ui(Span span, unsigned long num, unsigned long den)
+{
+    Expr *e = expr_number(span);
+    mpq_set_ui(e->as.number, num, den);
+    return e;
+}
+
+// Allocate an identifier expression with span and name.
 Expr *expr_id(Span span, StringView id)
 {
     Expr *e = expr_new(EXPR_IDENT, span);
@@ -77,6 +90,7 @@ Expr *expr_id(Span span, StringView id)
     return e;
 }
 
+// Allocate an infix expression with span implied by left and right.
 Expr *expr_infix(Expr *l, Operator op, Expr *r)
 {
     Span span = {l->span.from, r->span.to};
@@ -87,6 +101,7 @@ Expr *expr_infix(Expr *l, Operator op, Expr *r)
     return e;
 }
 
+// Allocate an prefix expression with span from start to expr.
 Expr *expr_prefix(Span start, Operator op, Expr *expr)
 {
     Span span = {start.from, expr->span.to};
@@ -96,12 +111,36 @@ Expr *expr_prefix(Span start, Operator op, Expr *expr)
     return e;
 }
 
-Expr *expr_assign(Span start, StringView id, Expr *expr)
+// Check if two expressions are structurally equal.
+bool expr_equal(const Expr *a, const Expr *b)
 {
-    Span span = {start.from, expr->span.to};
-    Expr *e = expr_new(EXPR_ASSIGN, span);
-    e->as.assign.id = id;
-    e->as.assign.expr = expr;
-    return e;
-}
+    if (a->kind != b->kind)
+        return false;
 
+    switch (a->kind)
+    {
+        case EXPR_ERROR:
+            return sv_equal(a->as.err, b->as.err);
+
+        case EXPR_IDENT:
+            return sv_equal(a->as.id, b->as.id);
+
+        case EXPR_NUMBER:
+            return mpq_cmp(a->as.number, b->as.number) == 0;
+
+        case EXPR_PREFIX:
+            if (a->as.prefix.op != b->as.prefix.op)
+                return false;
+            return expr_equal(a->as.prefix.expr, b->as.prefix.expr);
+
+        case EXPR_INFIX:
+            if (a->as.infix.op != b->as.infix.op)
+                return false;
+            if (!expr_equal(a->as.infix.left, b->as.infix.left))
+                return false;
+            return expr_equal(a->as.infix.right, b->as.infix.right);
+
+        default:
+            return false;
+    }
+}

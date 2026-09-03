@@ -4,6 +4,8 @@
 #include "ast.h"
 #include <gmp.h>
 
+typedef struct Scope Scope;
+
 // Kinds of a value.
 typedef enum
 {
@@ -11,6 +13,7 @@ typedef enum
     VAL_ERROR,
     VAL_NUMBER,
     VAL_BOOL,
+    VAL_LAMBDA,
 } ValueKind;
 
 // A value that an expression can evaluate to.
@@ -23,6 +26,12 @@ typedef struct
         mpq_t number;
 
         bool boolean;
+
+        struct
+        {
+            Expr *expr;
+            Scope *env;
+        } lambda;
     } as;
 
     Span span;
@@ -37,20 +46,13 @@ typedef struct
 } Symbol;
 
 // An environment scope.
-typedef struct
+typedef struct Scope
 {
     Symbol *data;
     size_t len;
     size_t cap;
+    struct Scope *parent;
 } Scope;
-
-// An array of scope.
-typedef struct
-{
-    Scope **data;
-    size_t len;
-    size_t cap;
-} Env;
 
 typedef enum
 {
@@ -72,7 +74,7 @@ typedef struct
 {
     unsigned long base;
     Value *last;
-    Env *env;
+    Scope *scope;
 } VM;
 
 void vm_init(VM *v);

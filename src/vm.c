@@ -5,12 +5,43 @@
 #include <assert.h>
 #include <stdarg.h>
 
+// Free a scope and all of its symbols.
+static void scope_free(Scope *s)
+{
+    DA_FOR(s, i)
+    {
+        Symbol sym = da_at(s, i);
+        str_free(sym.id);
+        free(sym.id);
+        vm_value_free(&sym.value);
+    }
+    da_free(s);
+}
+
+// Recursively free a scope.
+static void scope_free_r(Scope *s)
+{
+    scope_free(s);
+    while ((s = s->parent))
+        scope_free(s);
+}
+
+// Create a new scope from a parent.
+static Scope *scope_from(Scope *parent)
+{
+    Scope *s = malloc(sizeof(Scope));
+    da_init(s);
+    s->parent = parent;
+    return s;
+}
+
 // Lookup of string names for value kind.
 static const char *vk_to_str[] = {
     [VAL_VOID]    = "void",
     [VAL_ERROR]   = "error",
     [VAL_NUMBER]  = "number",
     [VAL_BOOL]    = "bool",
+    [VAL_LAMBDA]  = "lambda",
 };
 
 // Free the value.
@@ -25,6 +56,12 @@ void vm_value_free(Value *v)
 
         case VAL_ERROR:
             str_free(&v->as.error);
+            break;
+
+        case VAL_LAMBDA:
+            expr_destroy(&v->as.lambda.expr);
+            scope_free(v->as.lambda.env);
+            // free(v->as.lambda.env);
             break;
 
         default:
@@ -49,6 +86,17 @@ static void value_bool(Value *v, Span span, bool b)
     v->kind = VAL_BOOL;
     v->span = span;
     v->as.boolean = b;
+}
+
+// Initializes a lambda value.
+static void value_lambda(Value *v, Expr *e, Scope *s)
+{
+    assert(v);
+    assert(e->kind == EXPR_LAMBDA);
+    v->kind = VAL_LAMBDA;
+    v->span = e->span;
+    v->as.lambda.expr = expr_clone(e);
+    v->as.lambda.env = s;
 }
 
 // Initializes an error value with message.
@@ -102,44 +150,20 @@ static void value_set(Value *v, const Value *from)
             v->kind = VAL_ERROR;
             str_init_with(&v->as.error, &from->as.error);
             break;
+
+        case VAL_LAMBDA:
+            v->kind = VAL_LAMBDA;
+            Expr *l = from->as.lambda.expr;
+            v->as.lambda.expr = expr_lambda(l->as.lambda.param, l->as.lambda.body);
+            v->as.lambda.env = from->as.lambda.env;
+            break;
     }
-}
-
-// Free a scope and all of its symbols.
-static void scope_free(Scope *s)
-{
-    DA_FOR(s, i)
-    {
-        Symbol sym = da_at(s, i);
-        str_free(sym.id);
-        free(sym.id);
-        vm_value_free(&sym.value);
-    }
-    da_free(s);
-}
-
-// Enter a new scope.
-static void vm_enter(VM *v)
-{
-    Scope *s = malloc(sizeof(Scope));
-    da_init(s);
-    da_append(v->env, s);
-}
-
-// Leave the current scope and return to the parent.
-static void vm_leave(VM *v)
-{
-    Scope *s = da_last(v->env);
-    scope_free(s);
-    v->env->len--;
 }
 
 // Initialize a VM with default base;
 void vm_init(VM *v)
 {
-    v->env = malloc(sizeof(Env));
-    da_init(v->env);
-    vm_enter(v);
+    v->scope = scope_from(NULL);
     v->last = malloc(sizeof(Value));
     v->base = BASE_DEFAULT;
 }
@@ -147,10 +171,8 @@ void vm_init(VM *v)
 // Reset the state of a VM.
 void vm_reset(VM *v)
 {
-    for (size_t i = 1; i > v->env->len; i++)
-        scope_free(da_at(v->env, i));
-
-    da_reset(v->env);
+    scope_free_r(v->scope);
+    v->scope = scope_from(NULL);
     free(v->last);
     v->last = NULL;
     v->base = BASE_DEFAULT;
@@ -159,20 +181,14 @@ void vm_reset(VM *v)
 // Free a VM.
 void vm_free(VM *v)
 {
-    DA_FOR(v->env, i)
-    {
-        scope_free(da_at(v->env, i));
-    }
-    da_free(v->env);
-    free(v->env);
+    scope_free_r(v->scope);
     free(v->last);
     v->last = NULL;
 }
 
-// Assign a symbol to the current scope.
-static void symbol_set(VM *v, StringView id, const Value *value)
+// Assign a symbol to the scope.
+static void symbol_set(Scope *scope, StringView id, const Value *value)
 {
-    Scope *scope = da_last(v->env);
     DA_FOR(scope, i)
     {
         Symbol *existing = &da_at(scope, i);
@@ -190,17 +206,21 @@ static void symbol_set(VM *v, StringView id, const Value *value)
     da_append(scope, s);
 }
 
-static bool symbol_get(VM *v, StringView id, Value *out)
+// Find a symbol from the scope.
+static bool symbol_get(Scope *scope, StringView id, Value *out)
 {
-    Scope *scope = da_last(v->env);
-    DA_FOR(scope, i)
+    while (scope)
     {
-        Symbol existing = da_at(scope, i);
-        if (sv_equal(existing.id, id))
+        DA_FOR(scope, i)
         {
-            value_set(out, &existing.value);
-            return true;
+            Symbol existing = da_at(scope, i);
+            if (sv_equal(existing.id, id))
+            {
+                value_set(out, &existing.value);
+                return true;
+            }
         }
+        scope = scope->parent;
     }
     return false;
 }
@@ -231,7 +251,7 @@ static bool eval_ident(VM *v, Expr *e, Value *out)
     }
     else 
     {
-        if (!symbol_get(v, e->as.id, out))
+        if (!symbol_get(v->scope, SV(e->as.id), out))
             return errorf(out, e->span, "undefined symbol");
     }
     return true;
@@ -351,14 +371,52 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
 
     if (l->kind != EXPR_IDENT)
         return errorf(out, l->span, "Expected identifier");
-    if (is_builtin(l->as.id))
+    if (is_builtin(SV(l->as.id)))
         return errorf(out, l->span, "Cannot assign to builtin identifier");
 
     if (!vm_eval_expr(v, e->as.infix.right, out))
         return false;
 
-    symbol_set(v, l->as.id, out);
+    symbol_set(v->scope, SV(l->as.id), out);
     return true;
+}
+
+// Evaluate a call expression.
+static bool eval_call(VM *v, Expr *f, Expr *a, Value *out)
+{
+    bool ok = true;
+
+    Value func = {0};
+    if (!vm_eval_expr(v, f, &func))
+        return false;
+
+    if (func.kind != VAL_LAMBDA)
+    {
+        ok = errorf(out, f->span, "Expected lambda");
+        goto cleanup;
+    }
+    if (!vm_eval_expr(v, a, out))
+    {
+        ok = false;
+        goto cleanup;
+    }
+
+    Expr *lam = func.as.lambda.expr;
+    Scope *s = scope_from(func.as.lambda.env);
+    Scope *prev = v->scope;
+    v->scope = s;
+
+    if (lam->as.lambda.param->kind == EXPR_IDENT)
+        symbol_set(s, SV(lam->as.lambda.param->as.id), out);
+
+    ok = vm_eval_expr(v, lam->as.lambda.body, out);
+
+    scope_free(s);
+    v->scope = prev;
+
+cleanup:
+    vm_value_free(&func);
+    return ok;
 }
 
 // Evaluate an infix operation.
@@ -366,6 +424,9 @@ static bool eval_infix(VM *v, Expr *e, Value *out)
 {
     if (e->as.infix.op == OP_ASSIGN)
         return eval_assign_infix(v, e, out);
+
+    if (e->as.infix.op == OP_CALL)
+        return eval_call(v, e->as.infix.left, e->as.infix.right, out);
 
     bool ok = false;
 
@@ -401,6 +462,51 @@ cleanup:
     return ok;
 }
 
+// Capture free variables from the current scope that are no shadowed by params.
+static void capture_free_vars(VM *v, Expr *e, Scope *s)
+{
+    Value tmp = {0};
+
+    switch (e->kind)
+    {
+        case EXPR_IDENT:
+            if (symbol_get(v->scope, SV(e->as.id), &tmp))
+                symbol_set(s, SV(e->as.id), &tmp);
+            break;
+
+        case EXPR_INFIX:
+            capture_free_vars(v, e->as.infix.left, s);
+            capture_free_vars(v, e->as.infix.right, s);
+            break;
+
+        case EXPR_PREFIX:
+            capture_free_vars(v, e->as.prefix.expr, s);
+            break;
+
+        case EXPR_LAMBDA:
+            capture_free_vars(v, e->as.lambda.body, s);
+            break;
+
+        case EXPR_ERROR:
+        case EXPR_NUMBER:
+            break;
+
+        default:
+            UNREACHABLE();
+    }
+    vm_value_free(&tmp);
+}
+
+// Evaluate a lambda expression.
+static bool eval_lambda(VM *v, Expr *e, Value *out)
+{
+    Scope *s = scope_from(NULL);
+    capture_free_vars(v, e->as.lambda.body, s);
+
+    value_lambda(out, e, s);
+    return true;
+}
+
 // Evaluate an expression.
 bool vm_eval_expr(VM *v, Expr *e, Value *out)
 {
@@ -418,6 +524,7 @@ bool vm_eval_expr(VM *v, Expr *e, Value *out)
         case EXPR_IDENT:  ok = eval_ident(v, e, out);  break;
         case EXPR_INFIX:  ok = eval_infix(v, e, out);  break;
         case EXPR_PREFIX: ok = eval_prefix(v, e, out); break;
+        case EXPR_LAMBDA: ok = eval_lambda(v, e, out); break;
         default:          UNREACHABLE();
     }
 
@@ -435,7 +542,7 @@ bool vm_run(VM *v, StringView src, Value *out)
 }
 
 // Render a number value.
-static void number_value_render(Value *v, String *sb, RenderCtx *ctx)
+static void value_render_number(Value *v, String *sb, RenderCtx *ctx)
 {
     if (ctx->base >= 62)
     {
@@ -469,56 +576,103 @@ static void number_value_render(Value *v, String *sb, RenderCtx *ctx)
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 
+// Render an error value.
+static void value_render_error(Value *v, String *sb, RenderCtx *ctx)
+{
+    str_appendf(sb, SV_FMT"\n", SV_ARG(ctx->src));
+    for (size_t i = 0; i < v->span.from; i++)
+        str_append(sb, " ");
+
+    if (ctx->use_color) str_appendf(sb, AFMT_BOLD ACOLOR_MAGENTA);
+    for (size_t i = 0; i < v->span.to - v->span.from; i++)
+        str_appendf(sb, "^");
+
+    str_appendf(sb, " "SV_FMT, SV_ARG(SV(v->as.error)));
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+}
+
+// Render a bool value.
+static void value_render_bool(Value *v, String *sb, RenderCtx *ctx)
+{
+    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+    str_appendf(sb, "@%s", v->as.boolean ? "true" : "false");
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+}
+
+// Render an expression with identifiers substituted.
+static void render_with_subst(Scope *s, Expr *e, String *sb, RenderCtx *ctx)
+{
+    Value tmp = {0};
+
+    switch (e->kind)
+    {
+        case EXPR_LAMBDA:
+            expr_render(e->as.lambda.param, sb);
+            str_appendf(sb, " : ");
+            render_with_subst(s, e->as.lambda.body, sb, ctx);
+            break;
+
+        case EXPR_IDENT:
+            if (symbol_get(s, SV(e->as.id), &tmp))
+            {
+                vm_value_render(&tmp, sb, ctx);
+                break;
+            }
+            // fallthrough
+        default:
+            expr_render(e, sb);
+            break;
+    }
+    vm_value_free(&tmp);
+}
+
+// Render a lambda value;
+static void value_render_lambda(Value *v, String *sb, RenderCtx *ctx)
+{
+    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+
+    Expr *e = v->as.lambda.expr;
+    render_with_subst(v->as.lambda.env, e, sb, ctx);
+
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+}
+
 // Render a value to the string builder.
 // The render may contain newlines but will not have a final newline.
 void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
 {
-    if (v->kind == VAL_ERROR)
-    {
-        str_appendf(sb, SV_FMT"\n", SV_ARG(ctx->src));
-        for (size_t i = 0; i < v->span.from; i++)
-            str_append(sb, " ");
-
-        if (ctx->use_color) str_appendf(sb, AFMT_BOLD ACOLOR_MAGENTA);
-            for (size_t i = 0; i < v->span.to - v->span.from; i++)
-                str_appendf(sb, "^");
-
-            str_appendf(sb, " "SV_FMT, SV_ARG(SV(v->as.error)));
-        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-        return;
-    }
-    if (v->kind == VAL_NUMBER)
-    {
-        number_value_render(v, sb, ctx);
-        return;
-    }
-
-    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
     switch (v->kind)
     {
-        case VAL_BOOL:
-            str_appendf(sb, "@%s", v->as.boolean ? "true" : "false");
-            break;
-
-        default:
-            break;
+        case VAL_ERROR:  return value_render_error(v, sb, ctx);
+        case VAL_NUMBER: return value_render_number(v, sb, ctx);
+        case VAL_BOOL:   return value_render_bool(v, sb, ctx);
+        case VAL_LAMBDA: return value_render_lambda(v, sb, ctx);
+        case VAL_VOID:   break;
+        default:         UNREACHABLE();
     }
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 
+// Render the current environment of the VM.
 void vm_env_render(VM *v, String *sb, RenderCtx *ctx)
 {
-    DA_FOR(v->env, i)
+    Scope *scope = v->scope;
+    int lvl = 0;
+
+    while (scope)
     {
-        str_appendf(sb, "Scope (%zu)\n", i);
-        Scope *scope = da_at(v->env, i);
-        DA_FOR(scope, j)
+        if (ctx->use_color) str_appendf(sb, ACOLOR_CYAN);
+        str_appendf(sb, "Scope (%d)\n", lvl);
+        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+
+        DA_FOR(v->scope, i)
         {
-            Symbol sym = da_at(scope, j);
+            Symbol sym = da_at(v->scope, i);
             str_appendf(sb, "    "SV_FMT" = ", SV_ARG(SV(sym.id)));
             vm_value_render(&sym.value, sb, ctx);
             str_append(sb, "\n");
         }
-        str_append(sb, "\n");
+        scope = scope->parent;
+        lvl++;
     }
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }

@@ -11,7 +11,12 @@
 
 #define EXPR_CHECK(got, want) do { \
     Expr *__e = (want); \
-    CUT_CHECK(expr_equal((got), __e)); \
+    if (!expr_equal((got), __e)) { \
+        String __s; str_init(&__s); \
+        expr_render(got, &__s); \
+        CUT_ERROR("expression not equal:\n"SV_FMT, SV_ARG(SV(__s))); \
+        str_free(&__s); \
+    } \
     expr_destroy(&__e); \
 } while (0)
 
@@ -355,3 +360,34 @@ TEST(assign_is_right_associative_and_left_must_be_id)
     expr_destroy(&e);
 }
 
+TEST(parse_lambda_expression)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "@x : @x + 1", 10);
+    EXPR_CHECK(e,
+        expr_lambda(
+            expr_id((Span){0}, SV("@x")),
+            expr_infix(
+                expr_id((Span){0}, SV("@x")),
+                OP_ADD,
+                expr_number_ui((Span){0}, 1, 1)
+            )
+        ));
+
+    PARSE(e, "@x : @y : @x + @y", 10);
+    EXPR_CHECK(e,
+        expr_lambda(
+            expr_id((Span){0}, SV("@x")),
+            expr_lambda(
+                expr_id((Span){0}, SV("@y")),
+                expr_infix(
+                    expr_id((Span){0}, SV("@x")),
+                    OP_ADD,
+                    expr_id((Span){0}, SV("@y"))
+                )
+            )
+        ));
+
+    expr_destroy(&e);
+}

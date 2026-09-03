@@ -41,6 +41,9 @@
     X(TOK_AT,      "@") \
     X(TOK_ID,      "identifier") \
     X(TOK_ASSIGN,  "=") \
+\
+    X(TOK_COLON,   ":") \
+    X(TOK_CALL,    "$")
 
 #define AS_ENUM(name, _) name,
 #define AS_STR(name, s)  [name] = (s),
@@ -97,6 +100,8 @@ static TokenKind token_kind_get(StringView src)
 
         case '_': return TOK_UNDER;
         case '@': return TOK_AT;
+        case ':': return TOK_COLON;
+        case '$': return TOK_CALL;
 
         case '=':
             return next == '=' ? TOK_EQ : TOK_ASSIGN;
@@ -256,6 +261,8 @@ typedef enum
     PREC_PRODUCT,
     PREC_POWER,
 
+    PREC_CALL,
+
     PREC_PREFIX,
     PREC_BASE,
 } OpPrec;
@@ -289,6 +296,9 @@ static OpPrec token_prec(Token t)
         case TOK_ASSIGN:
             return PREC_ASSIGN;
 
+        case TOK_CALL:
+            return PREC_CALL;
+
         default:
             return PREC_PRIMARY;
     }
@@ -313,6 +323,7 @@ static Operator token_to_op(Token t)
         case TOK_SLASH:  return OP_DIV;
         case TOK_CARET:  return OP_POW;
         case TOK_ASSIGN: return OP_ASSIGN;
+        case TOK_CALL:   return OP_CALL;
 
         default:         return OP_NIL;
     }
@@ -561,11 +572,28 @@ static Expr *parse_ident(Parser *p)
     return expr_id(token_span(t), t.value);
 }
 
+// Parse a lambda expression.
+static Expr *parse_lambda(Parser *p)
+{
+    Expr *id = parse_ident(p);
+    if (is_error(id)) return id;
+
+    CONSUME_EXPECT(p, TOK_COLON);
+
+    Expr *body = parse_expr(p, PREC_PRIMARY);
+    if (is_error(body)) return body;
+
+    return expr_lambda(id, body);
+}
+
 // Parse a null denotation expression.
 static Expr *parse_nud(Parser *p)
 {
     if (peek(p, 1).kind == TOK_HASH)
         return parse_base_tag(p);
+
+    if (peek(p, 1).kind == TOK_COLON)
+        return parse_lambda(p);
 
     if (is_alnum(p))
         return parse_number(p, DIGIT_FMT_ALNUM);

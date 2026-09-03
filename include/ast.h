@@ -29,7 +29,8 @@ typedef struct
     X(OP_GT ,    ">") \
     X(OP_GEQ,    ">=") \
 \
-    X(OP_ASSIGN, "=")
+    X(OP_ASSIGN, "=") \
+    X(OP_CALL,   "$")
 
 #define AS_ENUM(name, _) name,
 #define AS_STR(name, s)  [name] = (s),
@@ -50,6 +51,8 @@ typedef enum
 
     EXPR_INFIX,
     EXPR_PREFIX,
+
+    EXPR_LAMBDA,
 } ExprKind;
 
 typedef struct Expr
@@ -60,7 +63,7 @@ typedef struct Expr
 
         mpq_t number;
 
-        StringView id;
+        String id;
 
         struct
         {
@@ -74,40 +77,34 @@ typedef struct Expr
             Operator op;
             struct Expr *expr;
         } prefix;
+
+        struct
+        {
+            struct Expr *param;
+            struct Expr *body;
+        } lambda;
     } as;
 
     Span span;
     ExprKind kind;
 } Expr;
 
-// Free an expression recursively.
 void expr_free(Expr *e);
-
-// Free an expression's content and itself.
 void expr_destroy(Expr **ep);
 
-// Checks if an expression is error.
 #define is_error(e) (e->kind == EXPR_ERROR)
 
-// Allocate an error expression with span and message.
 Expr *expr_err(Span span, const char *fmt, ...);
-
-// Allocate a number expression with span without setting a value.
 Expr *expr_number(Span span);
-
-// Allocate a number expression with value.
 Expr *expr_number_ui(Span span, unsigned long num, unsigned long den);
-
-// Allocate an identifier expression with span and name.
 Expr *expr_id(Span span, StringView id);
-
-// Allocate an infix expression with span implied by left and right.
 Expr *expr_infix(Expr *l, Operator op, Expr *r);
-
-// Allocate an prefix expression with span from start to expr.
 Expr *expr_prefix(Span start, Operator op, Expr *expr);
+Expr *expr_lambda(Expr *id, Expr *body);
 
-// Check if two expressions are structurally equal.
+Expr *expr_clone(const Expr *e);
+
 bool expr_equal(const Expr *a, const Expr *b);
+void expr_render(const Expr *e, String *sb);
 
 #endif

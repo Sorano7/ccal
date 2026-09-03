@@ -177,3 +177,18 @@ TEST(cannot_assign_to_builtin)
         EVAL_FAIL("@@ = @true");
     END();
 }
+
+TEST(lambda_call_eval)
+{
+    START();
+        EVAL("(@x: @x * 2) $ 2", &val);
+        NUM_EQ(&val, 4, 1);
+
+        EVAL("(@x: @y: @x + @y) $ 2 $ 4", &val);
+        NUM_EQ(&val, 6, 1);
+
+        EVAL("@add = @x: @y: @x + @y", &val);
+        EVAL("@add $ 10", &val);
+        CUT_CHECK(val.kind == VAL_LAMBDA);
+    END();
+}

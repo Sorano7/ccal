@@ -30,6 +30,10 @@ void expr_free(Expr *e)
             mpq_clear(e->as.number);
             break;
 
+        case EXPR_IDENT:
+            str_free(&e->as.id);
+            break;
+
         case EXPR_INFIX:
             expr_free(e->as.infix.left);
             expr_free(e->as.infix.right);
@@ -86,7 +90,7 @@ Expr *expr_number_ui(Span span, unsigned long num, unsigned long den)
 Expr *expr_id(Span span, StringView id)
 {
     Expr *e = expr_new(EXPR_IDENT, span);
-    e->as.id = id;
+    str_init_with(&e->as.id, id);
     return e;
 }
 
@@ -109,6 +113,57 @@ Expr *expr_prefix(Span start, Operator op, Expr *expr)
     e->as.prefix.op = op;
     e->as.prefix.expr = expr;
     return e;
+}
+
+// Allocate a lambda expression.
+Expr *expr_lambda(Expr *id, Expr *body)
+{
+    Span span = {id->span.from, body->span.to};
+    Expr *e = expr_new(EXPR_LAMBDA, span);
+    e->as.lambda.param = id;
+    e->as.lambda.body = body;
+    return e;
+}
+
+// Create a deep clone of the expression.
+Expr *expr_clone(const Expr *e)
+{
+    Expr *out = expr_new(e->kind, e->span);
+    switch (e->kind)
+    {
+        case EXPR_IDENT:
+            str_init_with(&out->as.id, &e->as.id);
+            break;
+
+        case EXPR_ERROR:
+            str_init_with(&out->as.err, &e->as.err);
+            break;
+
+        case EXPR_NUMBER:
+            mpq_init(out->as.number);
+            mpq_set(out->as.number, e->as.number);
+            break;
+
+        case EXPR_INFIX:
+            out->as.infix.left = expr_clone(e->as.infix.left);
+            out->as.infix.op = e->as.infix.op;
+            out->as.infix.right = expr_clone(e->as.infix.right);
+            break;
+
+        case EXPR_PREFIX:
+            out->as.prefix.op = e->as.prefix.op;
+            out->as.prefix.expr = expr_clone(e->as.prefix.expr);
+            break;
+
+        case EXPR_LAMBDA:
+            out->as.lambda.param = expr_clone(e->as.lambda.param);
+            out->as.lambda.body = expr_clone(e->as.lambda.body);
+            break;
+
+        default:
+            UNREACHABLE();
+    }
+    return out;
 }
 
 // Check if two expressions are structurally equal.
@@ -140,7 +195,55 @@ bool expr_equal(const Expr *a, const Expr *b)
                 return false;
             return expr_equal(a->as.infix.right, b->as.infix.right);
 
+        case EXPR_LAMBDA:
+            if (!expr_equal(a->as.lambda.param, b->as.lambda.param))
+                return false;
+            return expr_equal(a->as.lambda.body, b->as.lambda.body);
+
         default:
-            return false;
+            UNREACHABLE();
+    }
+}
+
+// Pretty print an expression.
+void expr_render(const Expr *e, String *sb)
+{
+    switch (e->kind)
+    {
+        case EXPR_IDENT:
+            str_appendf(sb, SV_FMT, SV_ARG(e->as.id));
+            break;
+
+        case EXPR_NUMBER:
+            char *s = mpq_get_str(NULL, 10, e->as.number);
+            str_appendf(sb, "%s", s);
+            free(s);
+            break;
+
+        case EXPR_ERROR:
+            str_append(sb, &e->as.err);
+            break;
+
+        case EXPR_INFIX:
+            expr_render(e->as.infix.left, sb);
+            str_appendf(sb, " %s ", op_to_str[e->as.infix.op]);
+            expr_render(e->as.infix.right, sb);
+            break;
+
+        case EXPR_PREFIX:
+            str_appendf(sb, "%s", op_to_str[e->as.infix.op]);
+            expr_render(e->as.prefix.expr, sb);
+            break;
+
+
+        case EXPR_LAMBDA:
+            expr_render(e->as.lambda.param, sb);
+
+            str_appendf(sb, " : ");
+            expr_render(e->as.lambda.body, sb);
+            break;
+
+        default:
+            UNREACHABLE();
     }
 }

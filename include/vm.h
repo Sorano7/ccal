@@ -1,16 +1,8 @@
 #ifndef VM_H
 #define VM_H
 
-#include "lexer.h"
+#include "ast.h"
 #include <gmp.h>
-
-// A VM for just-in-time evaluation.
-typedef struct
-{
-    unsigned long base;
-    TokenArray *ta;
-    size_t pos;
-} VM;
 
 // Kinds of a value.
 typedef enum
@@ -24,20 +16,41 @@ typedef enum
 // A value that an expression can evaluate to.
 typedef struct
 {
-    ValueKind kind;
     union
     {
-        struct
-        {
-            size_t pos;
-            char *msg;
-        } error;
+        String error;
 
         mpq_t number;
 
         bool boolean;
     } as;
+
+    Span span;
+    ValueKind kind;
 } Value;
+
+// A symbol to value binding.
+typedef struct
+{
+    String *id;
+    Value value;
+} Symbol;
+
+// An environment scope.
+typedef struct
+{
+    Symbol *data;
+    size_t len;
+    size_t cap;
+} Scope;
+
+// An array of scope.
+typedef struct
+{
+    Scope **data;
+    size_t len;
+    size_t cap;
+} Env;
 
 typedef enum
 {
@@ -54,11 +67,26 @@ typedef struct
     bool use_color;
 } RenderCtx;
 
+// A VM for just-in-time evaluation.
+typedef struct
+{
+    unsigned long base;
+    Value *last;
+    Env *env;
+} VM;
+
 void vm_init(VM *v);
+void vm_reset(VM *v);
 void vm_free(VM *v);
 
-bool vm_evaluate(VM *v, StringView src, Value *out);
-void vm_value_render(Value *v, String *sb, RenderCtx *ctx);
+bool vm_run(VM *v, StringView src, Value *out);
+
+bool vm_eval_module(VM *v, Module *m, Value *out);
+bool vm_eval_expr(VM *v, Expr *e, Value *out);
+
 void vm_value_free(Value *v);
+
+void vm_value_render(Value *v, String *sb, RenderCtx *ctx);
+void vm_env_render(VM *v, String *sb, RenderCtx *ctx);
 
 #endif

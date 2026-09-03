@@ -1,4 +1,6 @@
 #include "vm.h"
+#include <readline/readline.h>
+#include <readline/history.h>
 
 #define CUT_IMPL
 #include "cut.h"
@@ -6,29 +8,39 @@
 const char cli_help[] = "Commands:\n"
                         "     ccal help                  show this help\n"
                         "     ccal <opts>                start interactive REPL\n"
-                        "     ccal run <opts> <expr>     evaluate and output the result\n"
+                        "     ccal eval <opts> <expr>    evaluate and output the result\n"
                         "\n"
                         "Options:\n"
-                        "    -d|--decimal                set the output form to decimal\n"
-                        "    -r|--rational               set the output form to rational\n"
-                        "    -o|--obase n                set the output base to n\n"
-                        "    -i|--ibase n                set the default input base to n\n"
-                        "    -t|--truncate n             set the max number of digits in decimal form\n"
+                        "    -d | --decimal              set the output form to decimal\n"
+                        "    -r | --rational             set the output form to rational\n"
+                        "    -o | --obase    n           set the output base to n\n"
+                        "    -i | --ibase    n           set the default input base to n\n"
+                        "    -t | --truncate n           set the max number of digits in decimal form\n"
 ;
 
 const char repl_help[] = "Commands:\n"
-                         "    :h, :help           show this help\n"
-                         "    :q, :quit           exit the REPL\n"
-                         "    :s, :set            set one of the options\n"
+                         "    :h, :help             show this help\n"
+                         "    :q, :quit             exit the REPL\n"
+                         "    :s, :set              set one of the options\n"
                          "\n"
                          "Options:\n"
-                         "    dec|decimal         set the output form to decimal\n"
-                         "    rat|rational        set the output form to rational\n"
-                         "    ob|obase=n          set the output base to n\n"
-                         "    ib|ibase=n          set the default input base to n\n"
-                         "    tr|truncate=n       set the max number of digits in decimal form\n"
+                         "    dec | decimal         set the output form to decimal\n"
+                         "    rat | rational        set the output form to rational\n"
+                         "    ob  | obase=n         set the output base to n\n"
+                         "    ib  | ibase=n         set the default input base to n\n"
+                         "    tr  | truncate=n      set the max number of digits in decimal form\n"
 ;
 
+int clear_screen(int count, int key)
+{
+    (void)count; (void)key;
+    printf("\e[H\e[2J");
+    fflush(stdout);
+    rl_forced_update_display();
+    return 0;
+}
+
+// Setting the parameter with the set command.
 void repl_set_param_value(StringView s, unsigned long *v)
 {
     s = sv_trim(s);
@@ -47,6 +59,48 @@ void repl_set_param_value(StringView s, unsigned long *v)
     *v = val;
 }
 
+// Handle the set command.
+void repl_handle_set_command(VM *vm, RenderCtx *ctx, StringView src)
+{
+    StringView param = sv_split(&src, '=');
+    param = sv_trim(param);
+
+    if (param.len == 0)
+    {
+        printf("missing option\n");
+    }
+    else if (sv_equal(param, "dec") || sv_equal(param, "decimal"))
+    {
+        ctx->num_form = NUMBER_DECIMAL;
+        printf("output form: decimal\n");
+    }
+    else if (sv_equal(param, "rat") || sv_equal(param, "rational"))
+    {
+        ctx->num_form = NUMBER_RATIONAL;
+        printf("output form: rational\n");
+    }
+    else if (sv_equal(param, "ob") || sv_equal(param, "obase"))
+    {
+        repl_set_param_value(src, &ctx->base);
+        printf("output base: %lu\n", ctx->base);
+    }
+    else if (sv_equal(param, "ib") || sv_equal(param, "ibase"))
+    {
+        repl_set_param_value(src, &vm->base);
+        printf("input base: %lu\n", vm->base);
+    }
+    else if (sv_equal(param, "tr") || sv_equal(param, "truncate"))
+    {
+        repl_set_param_value(src, &ctx->max_digits);
+        printf("truncate at: %lu\n", ctx->max_digits);
+    }
+    else
+    {
+        printf("unknown option\n");
+    }
+}
+
+// Handle REPL commands.
 bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
 {
     if (ctx->use_color) printf(ACOLOR_CYAN);
@@ -65,44 +119,17 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
     {
         printf(repl_help);
     }
+    else if (sv_equal(cmd, "e") || sv_equal(cmd, "env"))
+    {
+        String sb;
+        str_init(&sb);
+        vm_env_render(vm, &sb, ctx);
+        printf(SV_FMT, SV_ARG(SV(sb)));
+        str_free(&sb);
+    }
     else if (sv_equal(cmd, "s") || sv_equal(cmd, "set"))
     {
-        StringView param = sv_split(&src, '=');
-        param = sv_trim(param);
-
-        if (param.len == 0)
-        {
-            printf("missing option\n");
-        }
-        else if (sv_equal(param, "dec") || sv_equal(param, "decimal"))
-        {
-            ctx->num_form = NUMBER_DECIMAL;
-            printf("output form: decimal\n");
-        }
-        else if (sv_equal(param, "rat") || sv_equal(param, "rational"))
-        {
-            ctx->num_form = NUMBER_RATIONAL;
-            printf("output form: rational\n");
-        }
-        else if (sv_equal(param, "ob") || sv_equal(param, "obase"))
-        {
-            repl_set_param_value(src, &ctx->base);
-            printf("output base: %lu\n", ctx->base);
-        }
-        else if (sv_equal(param, "ib") || sv_equal(param, "ibase"))
-        {
-            repl_set_param_value(src, &vm->base);
-            printf("input base: %lu\n", vm->base);
-        }
-        else if (sv_equal(param, "tr") || sv_equal(param, "truncate"))
-        {
-            repl_set_param_value(src, &ctx->max_digits);
-            printf("truncate at: %lu\n", ctx->max_digits);
-        }
-        else
-        {
-            printf("unknown option\n");
-        }
+        repl_handle_set_command(vm, ctx, src);
     }
     else
     {
@@ -116,22 +143,22 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
 // Start interactive REPL.
 void repl_start(VM *vm, RenderCtx *ctx)
 {
-    String in;
-    str_reserve(&in, 1024);
+    rl_bind_key('\014', clear_screen);
+
     String out;
     str_reserve(&out, 1024);
+    char *line;
 
     Value value = {0};
 
     for (;;)
     {
-        printf("> ");
+        line = readline("ccal> ");
+        if (!line) break;
 
-        str_reset(&in);
-        str_readline(&in, stdin);
-        StringView src = sv_trim(SV(in));
-
+        StringView src = sv_trim(SV(line));
         if (src.len == 0) continue;
+        add_history(line);
 
         if (sv_startswith(src, SV(":")))
         {
@@ -141,16 +168,16 @@ void repl_start(VM *vm, RenderCtx *ctx)
             continue;
         }
 
-        vm_evaluate(vm, src, &value);
+        vm_run(vm, src, &value);
 
         ctx->src = src;
         vm_value_render(&value, &out, ctx);
         printf(SV_FMT"\n", SV_ARG(SV(out)));
 
         str_reset(&out);
+        free(line);
     }
 
-    str_free(&in);
     str_free(&out);
 }
 
@@ -162,7 +189,7 @@ int run_oneshot(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
 
     Value value = {0};
 
-    bool ok = vm_evaluate(vm, src, &value);
+    bool ok = vm_run(vm, src, &value);
     ctx->src =src;
     vm_value_render(&value, &s, ctx);
     fprintf(fdout, SV_FMT"\n", SV_ARG(SV(s)));
@@ -191,7 +218,7 @@ int main(int argc, char **argv)
     bool rational = false;
     bool decimal = false;
 
-    cut_fp_add_command(&fp, SV("run"));
+    cut_fp_add_command(&fp, SV("eval"));
     cut_fp_add_command(&fp, SV("help"));
 
     cut_fp_add_flag(&fp, (int *)(&vm.base),        SV("ibase"), .short_name='i');
@@ -217,7 +244,7 @@ int main(int argc, char **argv)
     {
         printf(cli_help);
     }
-    else if (sv_equal(cmd, "run"))
+    else if (sv_equal(cmd, "eval"))
     {
         String sb;
         str_init(&sb);

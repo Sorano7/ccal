@@ -37,7 +37,7 @@
 } while (0)
 
 #define da_at(da, i)   (da)->data[(i)]
-#define da_last(da, i) (da)->data[(da)->len-1]
+#define da_last(da) (da)->data[(da)->len-1]
 
 #define DA_FOR(da, i) for (size_t i = 0; i < (da)->len; i++)
 
@@ -78,6 +78,10 @@
     } \
 } while (0)
 
+#define da_clone(da, from) do { \
+    da_reserve((da), (from)->len); \
+    da_appendn((da), (from)->data, (from)->len); \
+} while (0)
 
 /************************************************
  * Strings
@@ -135,15 +139,16 @@ bool _sv_equal(StringView a, StringView b);
 
 void str_append_char(String *s, char v);
 void str_append_view(String *s, StringView v);
-void str_append_str(String *s, String *v);
+void str_append_str(String *s, const String *v);
 void str_append_cstr(String *s, const char *v);
 
 #define str_append(s, v) _Generic((v), \
-    char:         str_append_char, \
-    char *:       str_append_cstr, \
-    const char *: str_append_cstr, \
-    StringView:   str_append_view, \
-    String *:     str_append_str \
+    char:           str_append_char, \
+    char *:         str_append_cstr, \
+    const char *:   str_append_cstr, \
+    StringView:     str_append_view, \
+    String *:       str_append_str, \
+    const String *: str_append_str \
 )(s, v)
 
 // Append a formatted string to the string.
@@ -177,6 +182,11 @@ void str_appendvf(String *s, const char *fmt, va_list args);
 #define str_reset(s) do { \
     da_reset(s); \
     str_append_null(s); \
+} while (0)
+
+#define str_clone(s, from) do { \
+    str_reserve((s), (from)->len+1); \
+    str_append((s), (from)); \
 } while (0)
 
 // Insert an element at index n.
@@ -681,7 +691,7 @@ void str_append_view(String *s, StringView v)
     str_append_null(s);
 }
 
-void str_append_str(String *s, String *v)
+void str_append_str(String *s, const String *v)
 {
     da_appendn(s, v->data, v->len);
     str_append_null(s);

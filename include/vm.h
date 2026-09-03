@@ -81,7 +81,6 @@ void vm_free(VM *v);
 
 bool vm_run(VM *v, StringView src, Value *out);
 
-bool vm_eval_module(VM *v, Module *m, Value *out);
 bool vm_eval_expr(VM *v, Expr *e, Value *out);
 
 void vm_value_free(Value *v);

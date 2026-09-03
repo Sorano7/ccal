@@ -110,13 +110,4 @@ Expr *expr_prefix(Span start, Operator op, Expr *expr);
 // Check if two expressions are structurally equal.
 bool expr_equal(const Expr *a, const Expr *b);
 
-
-typedef struct
-{
-    Expr **data;
-    size_t len, cap;
-} Module;
-
-void module_free(Module *m);
-
 #endif

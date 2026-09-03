@@ -182,7 +182,7 @@ void repl_start(VM *vm, RenderCtx *ctx)
 }
 
 // Run/evaluate a single expression and return the exit code.
-int run_oneshot(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
+int run_eval(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
 {
     String s;
     str_reserve(&s, 1024);
@@ -257,7 +257,7 @@ int main(int argc, char **argv)
 
         svlist_join(&args, &sb, SV(" "));
 
-        return run_oneshot(&vm, stdout, SV(sb), &ctx);
+        return run_eval(&vm, stdout, SV(sb), &ctx);
     }
     else
     {

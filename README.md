@@ -84,11 +84,10 @@ Variables are prefixed with `@` to distinguish from digits.
 42
 ```
 
-Assignment is an expression.
+Assignment is also an expression.
 
 ```
-
->@x = @y = @foo * 2
+> @x = @y = @foo * 2
 84
 ```
 

@@ -12,9 +12,9 @@ cc cut.c -o cut && ./cut build ccal
 ## Usage
 
 ```
-ccal help                --  show help
-ccal <opts>              --  start REPL
-ccal run <expr> <opts>   --  run oneshot
+ccal help                 --  show help
+ccal <opts>               --  start interactive REPL
+ccal eval <expr> <opts>   --  evaluate an expression
 ```
 
 Options include:
@@ -74,7 +74,7 @@ The base annotation scopes to a single expression.
 
 ## Variables
 
-Variables are prefixed with `@` to distinguish from digits. Assignment is an expression.
+Variables are prefixed with `@` to distinguish from digits.
 
 ```
 > @foo = 42
@@ -82,6 +82,14 @@ Variables are prefixed with `@` to distinguish from digits. Assignment is an exp
 
 > @foo
 42
+```
+
+Assignment is an expression.
+
+```
+
+>@x = @y = @foo * 2
+84
 ```
 
 Builtin symbols include:

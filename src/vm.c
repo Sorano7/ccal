@@ -621,9 +621,28 @@ static void render_with_subst(Scope *s, Expr *e, String *sb, RenderCtx *ctx)
             if (symbol_get(s, SV(e->as.id), &tmp))
             {
                 vm_value_render(&tmp, sb, ctx);
-                break;
+                if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
             }
-            // fallthrough
+            else
+            {
+                expr_render(e, sb);
+            }
+            break;
+
+        case EXPR_PREFIX:
+            str_appendf(sb, " %s", op_to_str[e->as.prefix.op]);
+            render_with_subst(s, e->as.prefix.expr, sb, ctx);
+            break;
+
+        case EXPR_INFIX:
+            render_with_subst(s, e->as.infix.left, sb, ctx);
+            if (e->as.infix.op == OP_APPLY)
+                str_appendf(sb, " ");
+            else
+                str_appendf(sb, " %s ", op_to_str[e->as.infix.op]);
+            render_with_subst(s, e->as.infix.right, sb, ctx);
+            break;
+
         default:
             expr_render(e, sb);
             break;

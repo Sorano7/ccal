@@ -30,7 +30,8 @@ typedef struct
     X(OP_GEQ,    ">=") \
 \
     X(OP_ASSIGN, "=") \
-    X(OP_CALL,   "$")
+    X(OP_APPLY,  " ") \
+    X(OP_PIPE,   "$")
 
 #define AS_ENUM(name, _) name,
 #define AS_STR(name, s)  [name] = (s),

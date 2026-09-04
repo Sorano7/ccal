@@ -59,6 +59,7 @@ DigitResult digits_from_alnum(DigitArray *ds, StringView s, unsigned long base)
         return (DigitResult){.kind=DIGIT_BASE_TOO_LARGE, .pos=0};
     for (size_t i = 0; i < s.len; i++)
     {
+        if (s.data[i] == '_') continue;
         unsigned long val = char_to_num(s.data[i], base);
         if (val == ULONG_MAX)
             return digit_error(i, DIGIT_INVALID);

@@ -33,68 +33,52 @@ Similar commands are available in REPL, prefixed with `:`.
 
 ### Numbers
 
-Basic shape of a number:
-
 ```
-<base#?><I><.N?>(R?)
+base#I.N(R)
 ```
 
-There are two ways to spell a sequence of digits.
+There are two ways to spell a sequence of digits, and a number must only contain one spelling.
 
-Alphanumerics: `[0-9][A-Z][a-z]_`. Up to base 62, and case-insensitive until base 36.
+1. Alphanumerics: `[0-9][A-Z][a-z]_`. 
+    - Up to base 62, and case-insensitive until base 36.
+2. Digit list: `[..., ..., ...]`. 
+    - Up to base-`2^32 - 1` or `2^64 - 1` depending on the platform.
 
 Examples:
 
 ```
-12#1A3
-16#ff
-1_024
-```
-
-Digit list: `[..., ..., ...]`. Up to base-`2^32 - 1` or `2^64 - 1` depending on the platform.
-
-```
-12#[1, 10, 3]
-16#[15, 15]
-[1, 0, 2, 4]
+12#1A3    == 12#[1, 10, 3]   == 267
+16#a.a    == 16#[10].[10]    == 10.625
+1_000.(3) == [1,0,0,0].([3]) == 3001/3
 ```
 
 The base annotation scopes to a single expression.
 
 ```
-> 16#FF
-255
-
-> 16#FF + 100
-355
-
-> 16#(FF + 100)
-511
+16#FF         -- 255
+16#FF + 100   -- 355
+16#(FF + 100) -- 511
 ```
 
 ## Variables
 
-Variables are prefixed with `@` to distinguish from digits.
+Variables are prefixed with `\` to distinguish from digits.
 
 ```
-> @foo = 42
-42
-
-> @foo
-42
+\foo = 42
+\x = \y = \foo * 2
+\true, \false, \ans, ...
 ```
 
-Assignment is also an expression.
+## Lambdas
+
+Defined as `<param> : <body>`.
 
 ```
-> @x = @y = @foo * 2
-84
+\x: \x + 1       -- fn (x) x + 1
+\x: \y: \x \y    -- fn (x) fn (y) x + y
 ```
 
-Builtin symbols include:
-
-```
-@true
-@false
-@@       --  last value in history
-```
+Two ways of application:
+1. White space (left-associative): `\f \x`.
+2. Dollar sign (right-associative): `\f $ \g \x`.

@@ -6,44 +6,44 @@
 
 
 #define TOKENS(X) \
-    X(TOK_EOF,     "EOF") \
-    X(TOK_SPACE,   " ") \
-    X(TOK_INVALID, "<invalid>") \
+    X(TOK_EOF,       "EOF") \
+    X(TOK_SPACE,     " ") \
+    X(TOK_INVALID,   "<invalid>") \
 \
-    X(TOK_ALPHA,   "alphabets") \
-    X(TOK_DIGIT,   "digits") \
-    X(TOK_ALNUM,   "alphanumerics") \
+    X(TOK_ALPHA,     "alphabets") \
+    X(TOK_DIGIT,     "digits") \
+    X(TOK_ALNUM,     "alphanumerics") \
 \
-    X(TOK_PLUS,    "+") \
-    X(TOK_MINUS,   "-") \
-    X(TOK_STAR,    "*") \
-    X(TOK_SLASH,   "/") \
-    X(TOK_CARET,   "^") \
+    X(TOK_PLUS,      "+") \
+    X(TOK_MINUS,     "-") \
+    X(TOK_STAR,      "*") \
+    X(TOK_SLASH,     "/") \
+    X(TOK_CARET,     "^") \
 \
-    X(TOK_GT,      ">") \
-    X(TOK_GEQ,     ">=") \
-    X(TOK_LT,      "<") \
-    X(TOK_LEQ,     "<=") \
+    X(TOK_GT,        ">") \
+    X(TOK_GEQ,       ">=") \
+    X(TOK_LT,        "<") \
+    X(TOK_LEQ,       "<=") \
 \
-    X(TOK_EQ,      "==") \
-    X(TOK_NEQ,     "!=") \
+    X(TOK_EQ,        "==") \
+    X(TOK_NEQ,       "!=") \
 \
-    X(TOK_DOT,     ".") \
-    X(TOK_COMMA,   ",") \
-    X(TOK_HASH,    "#") \
-    X(TOK_UNDER,   "_") \
+    X(TOK_DOT,       ".") \
+    X(TOK_COMMA,     ",") \
+    X(TOK_HASH,      "#") \
+    X(TOK_UNDER,     "_") \
 \
-    X(TOK_LBRAC,   "[") \
-    X(TOK_RBRAC,   "]") \
-    X(TOK_LPAREN,  "(") \
-    X(TOK_RPAREN,  ")") \
+    X(TOK_LBRAC,     "[") \
+    X(TOK_RBRAC,     "]") \
+    X(TOK_LPAREN,    "(") \
+    X(TOK_RPAREN,    ")") \
 \
-    X(TOK_AT,      "@") \
-    X(TOK_ID,      "identifier") \
-    X(TOK_ASSIGN,  "=") \
+    X(TOK_BACKSLASH, "\\") \
+    X(TOK_ID,        "identifier") \
+    X(TOK_ASSIGN,    "=") \
 \
-    X(TOK_COLON,   ":") \
-    X(TOK_CALL,    "$")
+    X(TOK_COLON,     ":") \
+    X(TOK_DOLLAR,    "$")
 
 #define AS_ENUM(name, _) name,
 #define AS_STR(name, s)  [name] = (s),
@@ -60,6 +60,8 @@ typedef struct
     StringView value;
     size_t pos;
     TokenKind kind;
+    bool ws_prefix;
+    bool ws_suffix;
 } Token;
 
 typedef struct
@@ -83,25 +85,25 @@ static TokenKind token_kind_get(StringView src)
 
     switch (c)
     {
-        case '+': return TOK_PLUS;
-        case '-': return TOK_MINUS;
-        case '*': return TOK_STAR;
-        case '/': return TOK_SLASH;
-        case '^': return TOK_CARET;
+        case '+':  return TOK_PLUS;
+        case '-':  return TOK_MINUS;
+        case '*':  return TOK_STAR;
+        case '/':  return TOK_SLASH;
+        case '^':  return TOK_CARET;
 
-        case '.': return TOK_DOT;
-        case ',': return TOK_COMMA;
-        case '#': return TOK_HASH;
+        case '.':  return TOK_DOT;
+        case ',':  return TOK_COMMA;
+        case '#':  return TOK_HASH;
 
-        case '[': return TOK_LBRAC;
-        case ']': return TOK_RBRAC;
-        case '(': return TOK_LPAREN;
-        case ')': return TOK_RPAREN;
+        case '[':  return TOK_LBRAC;
+        case ']':  return TOK_RBRAC;
+        case '(':  return TOK_LPAREN;
+        case ')':  return TOK_RPAREN;
 
-        case '_': return TOK_UNDER;
-        case '@': return TOK_AT;
-        case ':': return TOK_COLON;
-        case '$': return TOK_CALL;
+        case '_':  return TOK_UNDER;
+        case '\\': return TOK_BACKSLASH;
+        case ':':  return TOK_COLON;
+        case '$':  return TOK_DOLLAR;
 
         case '=':
             return next == '=' ? TOK_EQ : TOK_ASSIGN;
@@ -137,16 +139,13 @@ static size_t token_len(TokenKind kind)
 // Create a token.
 static inline Token token_create(TokenKind kind, StringView value, size_t pos)
 {
-    return (Token){.value=value, .pos=pos, .kind=kind};
+    return (Token){.value=value, .pos=pos, .kind=kind, .ws_prefix=false, .ws_suffix=false};
 }
 
 // Construct a number token and return the length.
 static size_t build_number_token(TokenArray *ta, StringView src, size_t pos)
 {
-    String sb;
-    str_init(&sb);
     TokenKind kind = TOK_DIGIT;
-
     size_t i = 0;
     for (; i < src.len; i++)
     {
@@ -157,8 +156,6 @@ static size_t build_number_token(TokenArray *ta, StringView src, size_t pos)
                 kind = TOK_ALNUM;
                 // fallthrough
             case TOK_DIGIT:
-                str_append(&sb, src.data[i]);
-                // fallthrough
             case TOK_UNDER:
                 break;
 
@@ -169,16 +166,13 @@ static size_t build_number_token(TokenArray *ta, StringView src, size_t pos)
         if (end) break;
     }
 
-    da_append(ta, token_create(kind, SV(sb), pos));
-    // sb leaked here
+    da_append(ta, token_create(kind, sv_slice(src, .to=i), pos));
     return i;
 }
 
 // Construct an identifier and return the length.
 static size_t build_id_token(TokenArray *ta, StringView src, size_t pos)
 {
-    TokenKind kind = TOK_ID;
-
     size_t i = 1;
     for (; i < src.len; i++)
     {
@@ -190,31 +184,48 @@ static size_t build_id_token(TokenArray *ta, StringView src, size_t pos)
             case TOK_UNDER:
                 break;
 
-            case TOK_AT:
-                end = true;
-                i++;
-                break;
-
             default:
                 end = true;
                 break;
         }
         if (end) break;
-}
+    }
     src = sv_slice(src, .to=i);
 
-    da_append(ta, token_create(kind, src, pos));
+    da_append(ta, token_create(TOK_ID, src, pos));
     return i;
 }
 
 // Tokenize the source.
 static bool tokenize(TokenArray *ta, StringView src)
 {
+#define SET_SUFFIX() do { \
+} while (0)
+
+#define SRC sv_slice(src, .from=i)
+
+    bool pending_space = false;
+
     size_t i = 0;
     while (i < src.len)
     {
-        TokenKind kind = token_kind_get(sv_slice(src, .from=i));
+        TokenKind kind = token_kind_get(SRC);
 
+        if (kind == TOK_SPACE)
+        {
+            while (i < src.len)
+            {
+                kind = token_kind_get(SRC);
+                if (kind != TOK_SPACE) break;
+                i++;
+            }
+            pending_space = true;
+
+            if (ta->len > 0)
+                da_last(ta).ws_suffix = true;
+
+            continue;
+        }
         switch (kind)
         {
             case TOK_INVALID:
@@ -223,16 +234,15 @@ static bool tokenize(TokenArray *ta, StringView src)
                 return false;
 
             case TOK_SPACE:
-                i++;
-                continue;
+                break;
 
             case TOK_DIGIT:
             case TOK_ALPHA:
-                i += build_number_token(ta, sv_slice(src, .from=i), i);
+                i += build_number_token(ta, SRC, i);
                 break;
 
-            case TOK_AT:
-                i += build_id_token(ta, sv_slice(src, .from=i), i);
+            case TOK_BACKSLASH:
+                i += build_id_token(ta, SRC, i);
                 break;
 
             default:
@@ -241,9 +251,18 @@ static bool tokenize(TokenArray *ta, StringView src)
                 i += len;
                 break;
         }
+
+        if (pending_space) {
+            if (ta->len > 0)
+                da_last(ta).ws_prefix = true;
+            pending_space = false;
+        }
     }
 
-    da_append(ta, token_create(TOK_EOF, SV(""), i));
+    da_append(ta, token_create(TOK_EOF, SV(" "), i));
+
+#undef SET_SUFFIX
+#undef SRC
     return true;
 }
 
@@ -261,7 +280,7 @@ typedef enum
     PREC_PRODUCT,
     PREC_POWER,
 
-    PREC_CALL,
+    PREC_APPLY,
 
     PREC_PREFIX,
     PREC_BASE,
@@ -296,8 +315,8 @@ static OpPrec token_prec(Token t)
         case TOK_ASSIGN:
             return PREC_ASSIGN;
 
-        case TOK_CALL:
-            return PREC_CALL;
+        case TOK_DOLLAR:
+            return PREC_APPLY;
 
         default:
             return PREC_PRIMARY;
@@ -322,8 +341,9 @@ static Operator token_to_op(Token t)
         case TOK_STAR:   return OP_MUL;
         case TOK_SLASH:  return OP_DIV;
         case TOK_CARET:  return OP_POW;
+
         case TOK_ASSIGN: return OP_ASSIGN;
-        case TOK_CALL:   return OP_CALL;
+        case TOK_DOLLAR: return OP_PIPE;
 
         default:         return OP_NIL;
     }
@@ -343,6 +363,7 @@ static bool is_right_associative(Operator op)
         case OP_POW:
         case OP_NEG:
         case OP_ASSIGN:
+        case OP_PIPE:
             return true;
 
         default:
@@ -373,6 +394,28 @@ typedef struct
         return expr_err(token_span(token(p)), "Expected '%s'", tk_to_str[k]); \
     (p)->pos++; \
 } while (0)
+
+// Return if the next expression is nud.
+static inline bool is_nud(Parser *p)
+{
+    switch (tkind(p))
+    {
+        case TOK_DIGIT:
+        case TOK_LPAREN:
+        case TOK_ALNUM:
+        case TOK_ID:
+        case TOK_LBRAC:
+        case TOK_UNDER:
+        case TOK_COLON:
+            return true;
+
+        case TOK_MINUS:
+            return !token(p).ws_suffix;
+
+        default:
+            return false;
+    }
+}
 
 static Expr *parse_expr(Parser *p, int prec);
 
@@ -437,11 +480,11 @@ static Expr *parse_number_part_dlist(Parser *p, DigitArray *ds, Span *out)
         {
             t = token(p);
             if (tkind(p) != TOK_DIGIT)
-                return expr_err(s, "Expected numeric value as digit");
+                return expr_err(token_span(t), "Expected numeric value as digit");
 
             unsigned long val;
             if (!token_to_ul(t, &val) || val >= p->base)
-                return expr_err(s, "Digit out of bounds");
+                return expr_err(token_span(t), "Digit out of bounds");
 
             da_append(ds, val);
             p->pos++;
@@ -474,6 +517,11 @@ static Expr *parse_number_part(Parser *p, DigitArray *ds, DigitFormat fmt, Span 
 // Parse a number literal in the form of I.N(R).
 static Expr *parse_number(Parser *p, DigitFormat fmt)
 {
+#define WS_ERR(p) do { \
+    e = expr_err(tspan(p), "Unexpected whitespace"); \
+    goto cleanup; \
+} while (0)
+
     Expr *e = NULL;
     Span s = {0};
 
@@ -481,7 +529,6 @@ static Expr *parse_number(Parser *p, DigitFormat fmt)
     literal_init(&lit);
     if ((e = parse_number_part(p, &lit.I, fmt, &s)))
         goto cleanup;
-
 
     if (tkind(p) != TOK_DOT)
         goto eval;
@@ -568,6 +615,8 @@ static Expr *parse_neg(Parser *p)
 static Expr *parse_ident(Parser *p)
 {
     Token t = token(p);
+    if (t.value.len < 2)
+        return expr_err(token_span(t), "Expected identifier");
     CONSUME_EXPECT(p, TOK_ID);
     return expr_id(token_span(t), t.value);
 }
@@ -610,6 +659,18 @@ static Expr *parse_nud(Parser *p)
     }
 }
 
+// Parse an application expression.
+static Expr *parse_apply(Parser *p, Expr *func)
+{
+    Expr *arg = parse_nud(p);
+    if (is_error(arg))
+    {
+        expr_destroy(&func);
+        return arg;
+    }
+    return expr_infix(func, OP_APPLY, arg);
+}
+
 // Parse a left denotation expression
 static Expr *parse_led(Parser *p, int prec, Expr *left)
 {
@@ -620,7 +681,7 @@ static Expr *parse_led(Parser *p, int prec, Expr *left)
             return expr_err(tspan(p), "Unknown operator");
         case OP_ASSIGN:
             if (left->kind != EXPR_IDENT)
-                return expr_err(tspan(p), "Expected identifier");
+                return expr_err(left->span, "Expected identifier");
             break;
         default:
             break;
@@ -646,10 +707,19 @@ static Expr *parse_expr(Parser *p, int prec)
     Expr *e = parse_nud(p);
     if (is_error(e)) return e;
 
-    for (int pc = tprec(p); pc > prec; pc = tprec(p))
+    for (;;)
     {
         if (tkind(p) == TOK_EOF) break;
-        e = parse_led(p, pc, e);
+
+        if (token(p).ws_prefix && is_nud(p))
+        {
+            e = parse_apply(p, e);
+        }
+        else
+        {
+            if ((int)tprec(p) <= prec) break;
+            e = parse_led(p, tprec(p), e);
+        }
         if (is_error(e)) return e;
     }
     return e;

@@ -60,7 +60,7 @@ void vm_value_free(Value *v)
 
         case VAL_LAMBDA:
             expr_destroy(&v->as.lambda.expr);
-            scope_free(v->as.lambda.env);
+            // scope_free(v->as.lambda.env);
             // free(v->as.lambda.env);
             break;
 
@@ -236,15 +236,15 @@ static bool eval_number(Expr *e, Value *out)
 // Evaluate an identifier
 static bool eval_ident(VM *v, Expr *e, Value *out)
 {
-    if (sv_equal(e->as.id, "@true"))
+    if (sv_equal(e->as.id, "\\true"))
     {
         value_bool(out, e->span, true);
     }
-    else if (sv_equal(e->as.id, "@false"))
+    else if (sv_equal(e->as.id, "\\false"))
     {
         value_bool(out, e->span, false);
     }
-    else if (sv_equal(e->as.id, "@@"))
+    else if (sv_equal(e->as.id, "\\ans"))
     {
         if (v->last)
             value_set(out, v->last);
@@ -259,9 +259,9 @@ static bool eval_ident(VM *v, Expr *e, Value *out)
 
 static bool is_builtin(StringView id)
 {
-    if (sv_equal(id, "@true")) return true;
-    if (sv_equal(id, "@false")) return true;
-    if (sv_equal(id, "@@")) return true;
+    if (sv_equal(id, "\\true")) return true;
+    if (sv_equal(id, "\\false")) return true;
+    if (sv_equal(id, "\\ans")) return true;
     return false;
 }
 
@@ -381,14 +381,18 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
     return true;
 }
 
-// Evaluate a call expression.
-static bool eval_call(VM *v, Expr *f, Expr *a, Value *out)
+// Evaluate an application expression.
+static bool eval_apply(VM *v, Expr *f, Expr *a, Value *out)
 {
     bool ok = true;
 
     Value func = {0};
     if (!vm_eval_expr(v, f, &func))
-        return false;
+    {
+        value_set(out, &func);
+        ok = false;
+        goto cleanup;
+    }
 
     if (func.kind != VAL_LAMBDA)
     {
@@ -425,8 +429,8 @@ static bool eval_infix(VM *v, Expr *e, Value *out)
     if (e->as.infix.op == OP_ASSIGN)
         return eval_assign_infix(v, e, out);
 
-    if (e->as.infix.op == OP_CALL)
-        return eval_call(v, e->as.infix.left, e->as.infix.right, out);
+    if (e->as.infix.op == OP_APPLY || e->as.infix.op == OP_PIPE)
+        return eval_apply(v, e->as.infix.left, e->as.infix.right, out);
 
     bool ok = false;
 
@@ -528,7 +532,8 @@ bool vm_eval_expr(VM *v, Expr *e, Value *out)
         default:          UNREACHABLE();
     }
 
-    value_set(v->last, out);
+    if (ok)
+        value_set(v->last, out);
     return ok;
 }
 
@@ -595,7 +600,7 @@ static void value_render_error(Value *v, String *sb, RenderCtx *ctx)
 static void value_render_bool(Value *v, String *sb, RenderCtx *ctx)
 {
     if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-    str_appendf(sb, "@%s", v->as.boolean ? "true" : "false");
+    str_appendf(sb, "\\%s", v->as.boolean ? "true" : "false");
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 

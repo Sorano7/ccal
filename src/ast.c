@@ -205,6 +205,24 @@ bool expr_equal(const Expr *a, const Expr *b)
     }
 }
 
+static void op_render(Operator op, String *sb)
+{
+    const char *ops = op_to_str[op];
+    switch (op)
+    {
+        case OP_NEG:
+            str_appendf(sb, " %s", ops);
+            break;
+
+        case OP_APPLY:
+            str_append(sb, " ");
+            break;
+
+        default:
+            str_appendf(sb, " %s ", ops);
+    }
+}
+
 // Pretty print an expression.
 void expr_render(const Expr *e, String *sb)
 {
@@ -225,22 +243,27 @@ void expr_render(const Expr *e, String *sb)
             break;
 
         case EXPR_INFIX:
+            str_appendf(sb, "(");
             expr_render(e->as.infix.left, sb);
-            str_appendf(sb, " %s ", op_to_str[e->as.infix.op]);
+            op_render(e->as.infix.op, sb);
             expr_render(e->as.infix.right, sb);
+            str_appendf(sb, ")");
             break;
 
         case EXPR_PREFIX:
-            str_appendf(sb, "%s", op_to_str[e->as.infix.op]);
+            str_appendf(sb, "(");
+            op_render(e->as.prefix.op, sb);
             expr_render(e->as.prefix.expr, sb);
+            str_appendf(sb, ")");
             break;
 
 
         case EXPR_LAMBDA:
+            str_appendf(sb, "(");
             expr_render(e->as.lambda.param, sb);
-
             str_appendf(sb, " : ");
             expr_render(e->as.lambda.body, sb);
+            str_appendf(sb, ")");
             break;
 
         default:

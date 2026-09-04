@@ -98,9 +98,9 @@ TEST(parse_identifier)
 {
     Expr *e = NULL;
 
-    PARSE(e, "@foo", 10);
+    PARSE(e, "\\foo", 10);
     CUT_CHECK(e->kind == EXPR_IDENT);
-    CUT_CHECK(sv_equal(e->as.id, "@foo"));
+    CUT_CHECK(sv_equal(e->as.id, "\\foo"));
 
     expr_destroy(&e);
 }
@@ -110,13 +110,6 @@ TEST(invalid_token_is_rejected)
     PARSE_FAIL("`", 10);
     PARSE_FAIL("|", 10);
     PARSE_FAIL("\"", 10);
-}
-
-TEST(must_not_contain_trailing_expressions)
-{
-    PARSE_FAIL("123 123", 10);
-    PARSE_FAIL("123 [1,2,3]", 10);
-    PARSE_FAIL("123 (-123)", 10);
 }
 
 TEST(infix_must_be_complete)
@@ -344,14 +337,14 @@ TEST(assign_is_right_associative_and_left_must_be_id)
 {
     Expr *e = NULL;
 
-    PARSE(e, "@x = @y = 20", 10);
+    PARSE(e, "\\x = \\y = 20", 10);
 
     EXPR_CHECK(e, 
         expr_infix(
-            expr_id((Span){0}, SV("@x")),
+            expr_id((Span){0}, SV("\\x")),
             OP_ASSIGN,
             expr_infix(
-                expr_id((Span){0}, SV("@y")),
+                expr_id((Span){0}, SV("\\y")),
                 OP_ASSIGN,
                 expr_number_ui((Span){0}, 20, 1)
             )
@@ -364,30 +357,61 @@ TEST(parse_lambda_expression)
 {
     Expr *e = NULL;
 
-    PARSE(e, "@x : @x + 1", 10);
+    PARSE(e, "\\x : \\x + 1", 10);
     EXPR_CHECK(e,
         expr_lambda(
-            expr_id((Span){0}, SV("@x")),
+            expr_id((Span){0}, SV("\\x")),
             expr_infix(
-                expr_id((Span){0}, SV("@x")),
+                expr_id((Span){0}, SV("\\x")),
                 OP_ADD,
                 expr_number_ui((Span){0}, 1, 1)
             )
         ));
 
-    PARSE(e, "@x : @y : @x + @y", 10);
+    PARSE(e, "\\x : \\y : \\x + \\y", 10);
     EXPR_CHECK(e,
         expr_lambda(
-            expr_id((Span){0}, SV("@x")),
+            expr_id((Span){0}, SV("\\x")),
             expr_lambda(
-                expr_id((Span){0}, SV("@y")),
+                expr_id((Span){0}, SV("\\y")),
                 expr_infix(
-                    expr_id((Span){0}, SV("@x")),
+                    expr_id((Span){0}, SV("\\x")),
                     OP_ADD,
-                    expr_id((Span){0}, SV("@y"))
+                    expr_id((Span){0}, SV("\\y"))
                 )
             )
         ));
+
+    expr_destroy(&e);
+}
+
+TEST(application_precedence)
+{
+    Expr *e = NULL;
+
+    // Note: valid AST since value is determined at run time.
+    PARSE(e, "1 2 3", 10);
+    EXPR_CHECK(e,
+            expr_infix(
+                expr_infix(
+                    expr_number_ui((Span){0}, 1, 1),
+                    OP_APPLY,
+                    expr_number_ui((Span){0}, 2, 1)
+                ),
+                OP_APPLY,
+                expr_number_ui((Span){0}, 3, 1)
+            ));
+
+    PARSE(e, "1 -2", 10);
+    EXPR_CHECK(e,
+            expr_infix(
+                expr_number_ui((Span){0}, 1, 1),
+                OP_APPLY,
+                expr_prefix((Span){0},
+                    OP_NEG,
+                    expr_number_ui((Span){0}, 2, 1)
+                )
+            ));
 
     expr_destroy(&e);
 }

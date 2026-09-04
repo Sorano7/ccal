@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <stdarg.h>
 
 /************************************************
  * Dynamic Array
@@ -36,8 +38,8 @@
     (da)->len = 0; \
 } while (0)
 
-#define da_at(da, i)   (da)->data[(i)]
-#define da_last(da) (da)->data[(da)->len-1]
+#define da_at(da, i) (da)->data[(i)]
+#define da_last(da)  (da)->data[(da)->len-1]
 
 #define DA_FOR(da, i) for (size_t i = 0; i < (da)->len; i++)
 
@@ -594,7 +596,6 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 
 #include <assert.h>
 #include <stddef.h>
-#include <stdarg.h>
 #include <time.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -615,6 +616,8 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 #else
 
 #include <unistd.h>
+#include <limits.h>
+#include <ctype.h>
 
 #define makedir(x) mkdir(x, 0755)
 

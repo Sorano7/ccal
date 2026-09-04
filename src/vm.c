@@ -32,6 +32,7 @@ static Scope *scope_from(Scope *parent)
     Scope *s = malloc(sizeof(Scope));
     da_init(s);
     s->parent = parent;
+    s->refcount = 0;
     return s;
 }
 
@@ -60,8 +61,15 @@ void vm_value_free(Value *v)
 
         case VAL_LAMBDA:
             expr_destroy(&v->as.lambda.expr);
-            // scope_free(v->as.lambda.env);
-            // free(v->as.lambda.env);
+            if (v->as.lambda.env->refcount == 0)
+            {
+                scope_free(v->as.lambda.env);
+                free(v->as.lambda.env);
+            }
+            else
+            {
+                v->as.lambda.env->refcount--;
+            }
             break;
 
         default:
@@ -156,6 +164,7 @@ static void value_set(Value *v, const Value *from)
             Expr *l = from->as.lambda.expr;
             v->as.lambda.expr = expr_lambda(l->as.lambda.param, l->as.lambda.body);
             v->as.lambda.env = from->as.lambda.env;
+            v->as.lambda.env->refcount++;
             break;
     }
 }
@@ -407,6 +416,7 @@ static bool eval_apply(VM *v, Expr *f, Expr *a, Value *out)
 
     Expr *lam = func.as.lambda.expr;
     Scope *s = scope_from(func.as.lambda.env);
+
     Scope *prev = v->scope;
     v->scope = s;
 

@@ -51,6 +51,7 @@ typedef struct Scope
     Symbol *data;
     size_t len;
     size_t cap;
+    size_t refcount;
     struct Scope *parent;
 } Scope;
 

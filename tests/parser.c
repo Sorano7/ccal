@@ -165,6 +165,25 @@ TEST(default_base_is_used_for_untagged_literal)
     expr_destroy(&e);
 }
 
+TEST(leading_zero_base_prefix)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "0x10", 10);
+    NUM_EQ(e, 16, 1);
+
+    PARSE(e, "0b10", 10);
+    NUM_EQ(e, 2, 1);
+
+    PARSE(e, "0o10", 10);
+    NUM_EQ(e, 8, 1);
+
+    PARSE(e, "0d10", 255);
+    NUM_EQ(e, 10, 1);
+
+    expr_destroy(&e);
+}
+
 TEST(base_tag_binds_to_one_expression)
 {
     Expr *e = NULL;

@@ -514,19 +514,37 @@ static Expr *parse_number_part(Parser *p, DigitArray *ds, DigitFormat fmt, Span 
     }
 }
 
+// Try parsing a base prefix in the form of a leading zero.
+static void try_parse_base_prefix(Token *t, unsigned long *base)
+{
+    if (t->kind != TOK_ALNUM) return;
+
+    if (sv_startswith(t->value, SV("0x")))
+        *base = 16;
+    else if (sv_startswith(t->value, SV("0b")))
+        *base = 2;
+    else if (sv_startswith(t->value, SV("0o")))
+        *base = 8;
+    else if (sv_startswith(t->value, SV("0d")))
+        *base = 10;
+    else
+        return;
+
+    sv_shift(&t->value, 2);
+}
+
 // Parse a number literal in the form of I.N(R).
 static Expr *parse_number(Parser *p, DigitFormat fmt)
 {
-#define WS_ERR(p) do { \
-    e = expr_err(tspan(p), "Unexpected whitespace"); \
-    goto cleanup; \
-} while (0)
-
     Expr *e = NULL;
     Span s = {0};
 
     Literal lit;
     literal_init(&lit);
+
+    unsigned long prev_base = p->base;
+    try_parse_base_prefix(&token(p), &p->base);
+
     if ((e = parse_number_part(p, &lit.I, fmt, &s)))
         goto cleanup;
 
@@ -560,6 +578,7 @@ eval:
 
 cleanup:
     literal_free(&lit);
+    p->base = prev_base;
     return e;
 }
 

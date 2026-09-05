@@ -521,6 +521,19 @@ static bool eval_lambda(VM *v, Expr *e, Value *out)
     return true;
 }
 
+// Evaluate a conditional expression.
+static bool eval_cond(VM *v, Expr *e, Value *out)
+{
+    if (!vm_eval_expr(v, e->as.cond.if_, out))
+        return false;
+    if (out->kind != VAL_BOOL)
+        return errorf(out, e->as.cond.if_->span, "Expected bool");
+
+    return out->as.boolean 
+        ? vm_eval_expr(v, e->as.cond.then, out)
+        : vm_eval_expr(v, e->as.cond.else_, out);
+}
+
 // Evaluate an expression.
 bool vm_eval_expr(VM *v, Expr *e, Value *out)
 {
@@ -539,6 +552,7 @@ bool vm_eval_expr(VM *v, Expr *e, Value *out)
         case EXPR_INFIX:  ok = eval_infix(v, e, out);  break;
         case EXPR_PREFIX: ok = eval_prefix(v, e, out); break;
         case EXPR_LAMBDA: ok = eval_lambda(v, e, out); break;
+        case EXPR_COND:   ok = eval_cond(v, e, out);   break;
         default:          UNREACHABLE();
     }
 

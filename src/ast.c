@@ -125,6 +125,17 @@ Expr *expr_lambda(Expr *id, Expr *body)
     return e;
 }
 
+// Allocate a conditional expression.
+Expr *expr_cond(Expr *if_, Expr *then, Expr *else_)
+{
+    Span span = {if_->span.from, else_->span.to};
+    Expr *e = expr_new(EXPR_COND, span);
+    e->as.cond.if_ = if_;
+    e->as.cond.then = then;
+    e->as.cond.else_ = else_;
+    return e;
+}
+
 // Create a deep clone of the expression.
 Expr *expr_clone(const Expr *e)
 {
@@ -158,6 +169,12 @@ Expr *expr_clone(const Expr *e)
         case EXPR_LAMBDA:
             out->as.lambda.param = expr_clone(e->as.lambda.param);
             out->as.lambda.body = expr_clone(e->as.lambda.body);
+            break;
+
+        case EXPR_COND:
+            out->as.cond.if_ = expr_clone(e->as.cond.if_);
+            out->as.cond.then = expr_clone(e->as.cond.then);
+            out->as.cond.else_ = expr_clone(e->as.cond.else_);
             break;
 
         default:
@@ -199,6 +216,13 @@ bool expr_equal(const Expr *a, const Expr *b)
             if (!expr_equal(a->as.lambda.param, b->as.lambda.param))
                 return false;
             return expr_equal(a->as.lambda.body, b->as.lambda.body);
+
+        case EXPR_COND:
+            if (!expr_equal(a->as.cond.if_, b->as.cond.if_))
+                return false;
+            if (!expr_equal(a->as.cond.then, b->as.cond.then))
+                return false;
+            return expr_equal(a->as.cond.else_, b->as.cond.else_);
 
         default:
             UNREACHABLE();
@@ -263,6 +287,16 @@ void expr_render(const Expr *e, String *sb)
             expr_render(e->as.lambda.param, sb);
             str_appendf(sb, " : ");
             expr_render(e->as.lambda.body, sb);
+            str_appendf(sb, ")");
+            break;
+
+        case EXPR_COND:
+            str_appendf(sb, "(");
+            expr_render(e->as.cond.if_, sb);
+            str_appendf(sb, " ? ");
+            expr_render(e->as.cond.then, sb);
+            str_appendf(sb, " | ");
+            expr_render(e->as.cond.else_, sb);
             str_appendf(sb, ")");
             break;
 

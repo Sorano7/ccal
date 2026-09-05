@@ -193,3 +193,17 @@ TEST(lambda_call_eval)
         EVAL_FAIL("(\\x: \\x 2) 2");
     END();
 }
+
+TEST(conditional_eval)
+{
+    START();
+        EVAL("\\true ? 1 | 2", &val);
+        NUM_EQ(&val, 1, 1);
+
+        EVAL("\\x = 1", &val);
+        EVAL("(2 > 1) ? 1 | (\\x = 2)", &val);
+        NUM_EQ(&val, 1, 1);
+        EVAL("\\x", &val);
+        NUM_EQ(&val, 1, 1);
+    END();
+}

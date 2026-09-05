@@ -54,6 +54,7 @@ typedef enum
     EXPR_PREFIX,
 
     EXPR_LAMBDA,
+    EXPR_COND,
 } ExprKind;
 
 typedef struct Expr
@@ -84,6 +85,13 @@ typedef struct Expr
             struct Expr *param;
             struct Expr *body;
         } lambda;
+
+        struct
+        {
+            struct Expr *if_;
+            struct Expr *then;
+            struct Expr *else_;
+        } cond;
     } as;
 
     Span span;
@@ -102,6 +110,7 @@ Expr *expr_id(Span span, StringView id);
 Expr *expr_infix(Expr *l, Operator op, Expr *r);
 Expr *expr_prefix(Span start, Operator op, Expr *expr);
 Expr *expr_lambda(Expr *id, Expr *body);
+Expr *expr_cond(Expr *if_, Expr *then, Expr *else_);
 
 Expr *expr_clone(const Expr *e);
 

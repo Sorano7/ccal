@@ -434,3 +434,18 @@ TEST(application_precedence)
 
     expr_destroy(&e);
 }
+
+TEST(parse_conditional)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "\\true ? 1 | 2", 10);
+    EXPR_CHECK(e,
+            expr_cond(
+                expr_id((Span){0}, SV("\\true")),
+                expr_number_ui((Span){0}, 1, 1),
+                expr_number_ui((Span){0}, 2, 1)
+            ));
+
+    expr_destroy(&e);
+}

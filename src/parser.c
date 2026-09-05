@@ -43,7 +43,9 @@
     X(TOK_ASSIGN,    "=") \
 \
     X(TOK_COLON,     ":") \
-    X(TOK_DOLLAR,    "$")
+    X(TOK_DOLLAR,    "$") \
+    X(TOK_QUESTION,  "?") \
+    X(TOK_BAR,       "|")
 
 #define AS_ENUM(name, _) name,
 #define AS_STR(name, s)  [name] = (s),
@@ -104,6 +106,8 @@ static TokenKind token_kind_get(StringView src)
         case '\\': return TOK_BACKSLASH;
         case ':':  return TOK_COLON;
         case '$':  return TOK_DOLLAR;
+        case '?':  return TOK_QUESTION;
+        case '|':  return TOK_BAR;
 
         case '=':
             return next == '=' ? TOK_EQ : TOK_ASSIGN;
@@ -720,11 +724,38 @@ static Expr *parse_led(Parser *p, int prec, Expr *left)
     return expr_infix(left, op, right);
 }
 
+// Parse a conditional expression.
+static Expr *parse_cond(Parser *p, Expr *if_)
+{
+    CONSUME_EXPECT(p, TOK_QUESTION);
+
+    Expr *then = parse_expr(p, PREC_PRIMARY);
+    if (is_error(then)) 
+    {
+        expr_destroy(&if_);
+        return then;
+    }
+
+    CONSUME_EXPECT(p, TOK_BAR);
+
+    Expr *else_ = parse_expr(p, PREC_PRIMARY);
+    if (is_error(else_)) 
+    {
+        expr_destroy(&if_);
+        expr_destroy(&then);
+        return else_;
+    }
+    return expr_cond(if_, then, else_);
+}
+
 // Parse an expression.
 static Expr *parse_expr(Parser *p, int prec)
 {
     Expr *e = parse_nud(p);
     if (is_error(e)) return e;
+
+    if (tkind(p) == TOK_QUESTION)
+        return parse_cond(p, e);
 
     for (;;)
     {

@@ -204,14 +204,17 @@ static void symbol_set(Scope *scope, StringView id, const Value *value)
         if (sv_equal(existing->id, id))
         {
             vm_value_free(&existing->value);
-            value_set(&existing->value, value);
+            if (value)
+                value_set(&existing->value, value);
             return;
         }
     }
     Symbol s = {0};
     s.id = malloc(sizeof(String));
     str_init_with(s.id, id);
-    value_set(&s.value, value);
+
+    if (value)
+        value_set(&s.value, value);
     da_append(scope, s);
 }
 
@@ -225,6 +228,8 @@ static bool symbol_get(Scope *scope, StringView id, Value *out)
             Symbol existing = da_at(scope, i);
             if (sv_equal(existing.id, id))
             {
+                if (existing.value.kind == VAL_VOID)
+                    return false;
                 value_set(out, &existing.value);
                 return true;
             }
@@ -245,15 +250,15 @@ static bool eval_number(Expr *e, Value *out)
 // Evaluate an identifier
 static bool eval_ident(VM *v, Expr *e, Value *out)
 {
-    if (sv_equal(e->as.id, "\\true"))
+    if (sv_equal(e->as.id, "_true"))
     {
         value_bool(out, e->span, true);
     }
-    else if (sv_equal(e->as.id, "\\false"))
+    else if (sv_equal(e->as.id, "_false"))
     {
         value_bool(out, e->span, false);
     }
-    else if (sv_equal(e->as.id, "\\ans"))
+    else if (sv_equal(e->as.id, "_ans"))
     {
         if (v->last)
             value_set(out, v->last);
@@ -268,9 +273,10 @@ static bool eval_ident(VM *v, Expr *e, Value *out)
 
 static bool is_builtin(StringView id)
 {
-    if (sv_equal(id, "\\true")) return true;
-    if (sv_equal(id, "\\false")) return true;
-    if (sv_equal(id, "\\ans")) return true;
+    if (sv_equal(id, "_true")) return true;
+    if (sv_equal(id, "_false")) return true;
+    if (sv_equal(id, "_ans")) return true;
+    if (sv_equal(id, "_self")) return true;
     return false;
 }
 
@@ -630,7 +636,7 @@ static void value_render_error(Value *v, String *sb, RenderCtx *ctx)
 static void value_render_bool(Value *v, String *sb, RenderCtx *ctx)
 {
     if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-    str_appendf(sb, "\\%s", v->as.boolean ? "true" : "false");
+    str_appendf(sb, "_%s", v->as.boolean ? "true" : "false");
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 

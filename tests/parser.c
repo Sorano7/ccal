@@ -98,9 +98,9 @@ TEST(parse_identifier)
 {
     Expr *e = NULL;
 
-    PARSE(e, "\\foo", 10);
+    PARSE(e, "_foo", 10);
     CUT_CHECK(e->kind == EXPR_IDENT);
-    CUT_CHECK(sv_equal(e->as.id, "\\foo"));
+    CUT_CHECK(sv_equal(e->as.id, "_foo"));
 
     expr_destroy(&e);
 }
@@ -356,14 +356,14 @@ TEST(assign_is_right_associative_and_left_must_be_id)
 {
     Expr *e = NULL;
 
-    PARSE(e, "\\x = \\y = 20", 10);
+    PARSE(e, "_x = _y = 20", 10);
 
     EXPR_CHECK(e, 
         expr_infix(
-            expr_id((Span){0}, SV("\\x")),
+            expr_id((Span){0}, SV("_x")),
             OP_ASSIGN,
             expr_infix(
-                expr_id((Span){0}, SV("\\y")),
+                expr_id((Span){0}, SV("_y")),
                 OP_ASSIGN,
                 expr_number_ui((Span){0}, 20, 1)
             )
@@ -376,27 +376,27 @@ TEST(parse_lambda_expression)
 {
     Expr *e = NULL;
 
-    PARSE(e, "\\x : \\x + 1", 10);
+    PARSE(e, "_x : _x + 1", 10);
     EXPR_CHECK(e,
         expr_lambda(
-            expr_id((Span){0}, SV("\\x")),
+            expr_id((Span){0}, SV("_x")),
             expr_infix(
-                expr_id((Span){0}, SV("\\x")),
+                expr_id((Span){0}, SV("_x")),
                 OP_ADD,
                 expr_number_ui((Span){0}, 1, 1)
             )
         ));
 
-    PARSE(e, "\\x : \\y : \\x + \\y", 10);
+    PARSE(e, "_x : _y : _x + _y", 10);
     EXPR_CHECK(e,
         expr_lambda(
-            expr_id((Span){0}, SV("\\x")),
+            expr_id((Span){0}, SV("_x")),
             expr_lambda(
-                expr_id((Span){0}, SV("\\y")),
+                expr_id((Span){0}, SV("_y")),
                 expr_infix(
-                    expr_id((Span){0}, SV("\\x")),
+                    expr_id((Span){0}, SV("_x")),
                     OP_ADD,
-                    expr_id((Span){0}, SV("\\y"))
+                    expr_id((Span){0}, SV("_y"))
                 )
             )
         ));
@@ -439,10 +439,10 @@ TEST(parse_conditional)
 {
     Expr *e = NULL;
 
-    PARSE(e, "\\true ? 1 | 2", 10);
+    PARSE(e, "_true ? 1 | 2", 10);
     EXPR_CHECK(e,
             expr_cond(
-                expr_id((Span){0}, SV("\\true")),
+                expr_id((Span){0}, SV("_true")),
                 expr_number_ui((Span){0}, 1, 1),
                 expr_number_ui((Span){0}, 2, 1)
             ));

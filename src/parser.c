@@ -245,7 +245,7 @@ static bool tokenize(TokenArray *ta, StringView src)
                 i += build_number_token(ta, SRC, i);
                 break;
 
-            case TOK_BACKSLASH:
+            case TOK_UNDER:
                 i += build_id_token(ta, SRC, i);
                 break;
 

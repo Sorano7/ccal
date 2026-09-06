@@ -75,10 +75,10 @@ TEST(boolean_render_correct)
 {
     START();
         EVAL_RENDER("999 * 0.5 < 666 * 0.9", &val);
-        CUT_CHECK(sv_equal(sb, "\\true"));
+        CUT_CHECK(sv_equal(sb, "_true"));
 
         EVAL_RENDER("999 * 0.5 > 666 * 0.9", &val);
-        CUT_CHECK(sv_equal(sb, "\\false"));
+        CUT_CHECK(sv_equal(sb, "_false"));
     END();
 }
 
@@ -127,16 +127,16 @@ TEST(decimal_render_correct)
 TEST(variable_assign_and_evaluate)
 {
     START();
-        EVAL("\\x = 1", &val);
+        EVAL("_x = 1", &val);
         NUM_EQ(&val, 1, 1);
 
-        EVAL("\\x", &val);
+        EVAL("_x", &val);
         NUM_EQ(&val, 1, 1);
 
-        EVAL("\\x = 200", &val);
+        EVAL("_x = 200", &val);
         NUM_EQ(&val, 200, 1);
 
-        EVAL("\\x", &val);
+        EVAL("_x", &val);
         NUM_EQ(&val, 200, 1);
     END();
 }
@@ -144,10 +144,10 @@ TEST(variable_assign_and_evaluate)
 TEST(variable_dynamic_typing)
 {
     START();
-        EVAL("\\x = 1", &val);
+        EVAL("_x = 1", &val);
         NUM_EQ(&val, 1, 1);
 
-        EVAL("\\x = \\x > 1", &val);
+        EVAL("_x = _x > 1", &val);
         BOOL_EQ(&val, false);
     END();
 }
@@ -155,17 +155,17 @@ TEST(variable_dynamic_typing)
 TEST(cannot_access_unknown_variable)
 {
     START();
-        EVAL_FAIL("\\x");
+        EVAL_FAIL("_x");
     END();
 }
 
 TEST(builtin_constants_eval)
 {
     START();
-        EVAL("\\true", &val);
+        EVAL("_true", &val);
         BOOL_EQ(&val, true);
 
-        EVAL("\\false", &val);
+        EVAL("_false", &val);
         BOOL_EQ(&val, false);
     END();
 }
@@ -173,37 +173,37 @@ TEST(builtin_constants_eval)
 TEST(cannot_assign_to_builtin)
 {
     START();
-        EVAL_FAIL("\\true = 1");
-        EVAL_FAIL("\\ans = \\true");
+        EVAL_FAIL("_true = 1");
+        EVAL_FAIL("_ans = _true");
     END();
 }
 
 TEST(lambda_call_eval)
 {
     START();
-        EVAL("(\\x: \\x * 2) 2", &val);
+        EVAL("(_x: _x * 2) 2", &val);
         NUM_EQ(&val, 4, 1);
 
-        EVAL("(\\x: \\y: \\x + \\y) 2 4", &val);
+        EVAL("(_x: _y: _x + _y) 2 4", &val);
         NUM_EQ(&val, 6, 1);
 
-        EVAL("(\\x: \\x * 2) $ (\\x: \\x + 2) 2", &val);
+        EVAL("(_x: _x * 2) $ (_x: _x + 2) 2", &val);
         NUM_EQ(&val, 8, 1);
 
-        EVAL_FAIL("(\\x: \\x 2) 2");
+        EVAL_FAIL("(_x: _x 2) 2");
     END();
 }
 
 TEST(conditional_eval)
 {
     START();
-        EVAL("\\true ? 1 | 2", &val);
+        EVAL("_true ? 1 | 2", &val);
         NUM_EQ(&val, 1, 1);
 
-        EVAL("\\x = 1", &val);
-        EVAL("(2 > 1) ? 1 | (\\x = 2)", &val);
+        EVAL("_x = 1", &val);
+        EVAL("(2 > 1) ? 1 | (_x = 2)", &val);
         NUM_EQ(&val, 1, 1);
-        EVAL("\\x", &val);
+        EVAL("_x", &val);
         NUM_EQ(&val, 1, 1);
     END();
 }

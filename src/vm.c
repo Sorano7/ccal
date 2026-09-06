@@ -501,6 +501,12 @@ static void capture_free_vars(VM *v, Expr *e, Scope *s)
             capture_free_vars(v, e->as.lambda.body, s);
             break;
 
+        case EXPR_COND:
+            capture_free_vars(v, e->as.cond.if_, s);
+            capture_free_vars(v, e->as.cond.then, s);
+            capture_free_vars(v, e->as.cond.else_, s);
+            break;
+
         case EXPR_ERROR:
         case EXPR_NUMBER:
             break;

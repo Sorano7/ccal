@@ -399,6 +399,18 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
     return true;
 }
 
+// Convert a bool value to a church-boolean function.
+static Expr *bool_as_lambda(Value *b)
+{
+    return expr_lambda(
+            expr_id(b->span, SV("_x")),
+            expr_lambda(
+                expr_id(b->span, SV("_y")),
+                expr_id(b->span, b->as.boolean ? SV("_x") : SV("_y"))
+            )
+        );
+}
+
 // Evaluate an application expression.
 static bool eval_apply(VM *v, Expr *f, Expr *a, Value *out)
 {
@@ -412,7 +424,7 @@ static bool eval_apply(VM *v, Expr *f, Expr *a, Value *out)
         goto cleanup;
     }
 
-    if (func.kind != VAL_LAMBDA)
+    if (func.kind != VAL_LAMBDA && func.kind != VAL_BOOL)
     {
         ok = errorf(out, f->span, "Expected lambda");
         goto cleanup;
@@ -423,7 +435,10 @@ static bool eval_apply(VM *v, Expr *f, Expr *a, Value *out)
         goto cleanup;
     }
 
-    Expr *lam = func.as.lambda.expr;
+    Expr *lam = func.kind == VAL_LAMBDA
+        ? func.as.lambda.expr
+        : bool_as_lambda(&func);
+
     Scope *s = scope_from(func.as.lambda.env);
 
     Scope *prev = v->scope;
@@ -436,6 +451,9 @@ static bool eval_apply(VM *v, Expr *f, Expr *a, Value *out)
 
     scope_free(s);
     v->scope = prev;
+
+    if (func.kind == VAL_BOOL)
+        expr_destroy(&lam);
 
 cleanup:
     vm_value_free(&func);

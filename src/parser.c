@@ -275,6 +275,8 @@ typedef enum
 {
     PREC_PRIMARY,
 
+    PREC_COND,
+
     PREC_ASSIGN,
 
     PREC_EQUALITY,
@@ -295,6 +297,9 @@ static OpPrec token_prec(Token t)
 {
     switch (t.kind)
     {
+        case TOK_QUESTION:
+            return PREC_COND;
+
         case TOK_EQ:
         case TOK_NEQ:
             return PREC_EQUALITY;
@@ -694,9 +699,36 @@ static Expr *parse_apply(Parser *p, Expr *func)
     return expr_infix(func, OP_APPLY, arg);
 }
 
+// Parse a conditional expression.
+static Expr *parse_cond(Parser *p, Expr *if_)
+{
+    CONSUME_EXPECT(p, TOK_QUESTION);
+
+    Expr *then = parse_expr(p, PREC_PRIMARY);
+    if (is_error(then)) 
+    {
+        expr_destroy(&if_);
+        return then;
+    }
+
+    CONSUME_EXPECT(p, TOK_BAR);
+
+    Expr *else_ = parse_expr(p, PREC_PRIMARY);
+    if (is_error(else_)) 
+    {
+        expr_destroy(&if_);
+        expr_destroy(&then);
+        return else_;
+    }
+    return expr_cond(if_, then, else_);
+}
+
 // Parse a left denotation expression
 static Expr *parse_led(Parser *p, int prec, Expr *left)
 {
+    if (tkind(p) == TOK_QUESTION)
+        return parse_cond(p, left);
+
     Operator op = token_to_op(token(p));
     switch (op)
     {
@@ -724,38 +756,11 @@ static Expr *parse_led(Parser *p, int prec, Expr *left)
     return expr_infix(left, op, right);
 }
 
-// Parse a conditional expression.
-static Expr *parse_cond(Parser *p, Expr *if_)
-{
-    CONSUME_EXPECT(p, TOK_QUESTION);
-
-    Expr *then = parse_expr(p, PREC_PRIMARY);
-    if (is_error(then)) 
-    {
-        expr_destroy(&if_);
-        return then;
-    }
-
-    CONSUME_EXPECT(p, TOK_BAR);
-
-    Expr *else_ = parse_expr(p, PREC_PRIMARY);
-    if (is_error(else_)) 
-    {
-        expr_destroy(&if_);
-        expr_destroy(&then);
-        return else_;
-    }
-    return expr_cond(if_, then, else_);
-}
-
 // Parse an expression.
 static Expr *parse_expr(Parser *p, int prec)
 {
     Expr *e = parse_nud(p);
     if (is_error(e)) return e;
-
-    if (tkind(p) == TOK_QUESTION)
-        return parse_cond(p, e);
 
     for (;;)
     {

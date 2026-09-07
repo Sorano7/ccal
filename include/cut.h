@@ -123,7 +123,7 @@ StringView _sv_from_strp(const void *pp);
 
 // Declares a char array named `id`.
 #define SV_TO_CSTR(sv, id) \
-    char id[(sv).len]; \
+    char id[(sv).len+1]; \
     memcpy(&id, (sv).data, (sv).len); \
     id[(sv).len] = '\0';
 

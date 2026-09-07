@@ -392,6 +392,9 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
     if (!vm_eval_expr(v, e->as.infix.right, out))
         return false;
 
+    if (out->kind == VAL_LAMBDA)
+        symbol_set(out->as.lambda.env, SV(l->as.id), out);
+
     symbol_set(v->scope, SV(l->as.id), out);
     return true;
 }

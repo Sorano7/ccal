@@ -42,7 +42,7 @@
     CUT_MUST((v)->kind == VAL_NUMBER); \
     if (mpq_cmp_ui((v)->as.number, (n), (d)) != 0) { \
         char *s = mpq_get_str(NULL, 10, (v)->as.number); \
-        CUT_ERROR("expected %d/%d, found %s", s); \
+        CUT_ERROR("expected %d/%d, found %s", n, d, s); \
         free(s); \
     } \
 } while (0)
@@ -204,6 +204,36 @@ TEST(conditional_eval)
         EVAL("(2 > 1) ? 1 | (_x = 2)", &val);
         NUM_EQ(&val, 1, 1);
         EVAL("_x", &val);
+        NUM_EQ(&val, 1, 1);
+    END();
+}
+
+TEST(recursion_eval)
+{
+    START();
+        EVAL("_fact = _n: _n == 0 ? 1 | _n * _fact (_n - 1)", &val);
+
+        EVAL("_fact 0", &val);
+        NUM_EQ(&val, 1, 1);
+
+        EVAL("_fact 2", &val);
+        NUM_EQ(&val, 2, 1);
+
+        EVAL("_fact 5", &val);
+        NUM_EQ(&val, 120, 1);
+    END();
+}
+
+TEST(boolean_application)
+{
+    START();
+        EVAL("_true", &val);
+        BOOL_EQ(&val, true);
+
+        EVAL("_true 1", &val);
+        CUT_CHECK(val.kind == VAL_LAMBDA);
+
+        EVAL("_true 1 2", &val);
         NUM_EQ(&val, 1, 1);
     END();
 }

@@ -8,6 +8,8 @@
 #define TOKENS(X) \
     X(TOK_EOF,       "EOF") \
     X(TOK_SPACE,     " ") \
+    X(TOK_NEWLINE,   "\n") \
+    X(TOK_SEMICOLON, ";") \
     X(TOK_INVALID,   "<invalid>") \
 \
     X(TOK_ALPHA,     "alphabets") \
@@ -82,10 +84,6 @@ static TokenKind token_kind_get(StringView src)
     char c = src.data[0];
     char next = src.len > 1 ? src.data[1] : '\0';
 
-    if (isdigit(c)) return TOK_DIGIT;
-    if (isalpha(c)) return TOK_ALPHA;
-    if (isspace(c)) return TOK_SPACE;
-
     switch (c)
     {
         case '+':  return TOK_PLUS;
@@ -111,6 +109,9 @@ static TokenKind token_kind_get(StringView src)
         case '|':  return TOK_BAR;
         case '\'': return TOK_SQUOTE;
 
+        case ';':  return TOK_SEMICOLON;
+        case '\n': return TOK_NEWLINE;
+
         case '=':
             return next == '=' ? TOK_EQ : TOK_ASSIGN;
         case '!':
@@ -123,6 +124,10 @@ static TokenKind token_kind_get(StringView src)
                 return c == '<' ? TOK_LEQ : TOK_GEQ;
             return c == '<' ? TOK_LT : TOK_GT;
     }
+
+    if (isdigit(c)) return TOK_DIGIT;
+    if (isalpha(c)) return TOK_ALPHA;
+    if (isspace(c)) return TOK_SPACE;
 
     return TOK_INVALID;
 }
@@ -780,12 +785,14 @@ static Expr *parse_expr(Parser *p, int prec)
     return e;
 }
 
-// Parse an expression.
-Expr *parse(StringView src, unsigned long base)
+// Parse a module.
+bool parse_module(StringView src, unsigned long base, Module *m)
 {
     Span s = {0, 0};
     if (base == 0) base = BASE_DEFAULT;
     if (base == 1) return expr_err(s, "Base must be at least 2");
+
+    bool ok = true;
 
     TokenArray ta = {0};
     da_init(&ta);
@@ -795,7 +802,7 @@ Expr *parse(StringView src, unsigned long base)
     if (!tokenize(&ta, src))
     {
         e = expr_err(token_span(ta.data[0]), "Invalid token");
-        goto cleanup;
+        goto error;
     }
 
     Parser p = {
@@ -804,16 +811,45 @@ Expr *parse(StringView src, unsigned long base)
         .base = base,
     };
 
-    e = parse_expr(&p, PREC_PRIMARY);
-    if (is_error(e)) goto cleanup;
-
-    if (tkind(&p) != TOK_EOF)
+    for (;;)
     {
-        expr_destroy(&e);
-        e = expr_err(tspan(&p), "Trailing characters");
+        e = parse_expr(&p, PREC_PRIMARY);
+        if (is_error(e)) goto error;
+        da_append(m, e);
+
+        TokenKind tk = tkind(&p);
+        if (tk == TOK_EOF) break;
+
+        if (tk != TOK_NEWLINE && tk != TOK_SEMICOLON)
+        {
+            e = expr_err(tspan(&p), "Trailing characters");
+            goto error;
+        }
+
+        for (; tk == TOK_NEWLINE || tk == TOK_SEMICOLON; tk = tkind(&p))
+            p.pos++;
     }
+    goto cleanup;
+
+error:
+    da_reset(m);
+    da_append(m, e);
 
 cleanup:
     da_free(&ta);
+    return ok;
+}
+
+// Parse an expression.
+Expr *parse(StringView src, unsigned long base)
+{
+    Module m;
+    da_init(&m);
+
+    parse_module(src, base, &m);
+
+    Expr *e = expr_clone(da_last(&m));
+    module_free(&m);
     return e;
 }
+

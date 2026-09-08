@@ -3,7 +3,10 @@
 
 #include "ast.h"
 
-// Parser an expression.
+// Parse an expression.
 Expr *parse(StringView src, unsigned long base);
+
+// Parse a module.
+bool parse_module(StringView src, unsigned long base, Module *m);
 
 #endif

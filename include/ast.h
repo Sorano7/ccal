@@ -117,4 +117,12 @@ Expr *expr_clone(const Expr *e);
 bool expr_equal(const Expr *a, const Expr *b);
 void expr_render(const Expr *e, String *sb);
 
+typedef struct
+{
+    Expr **data;
+    size_t len, cap;
+} Module;
+
+void module_free(Module *m);
+
 #endif

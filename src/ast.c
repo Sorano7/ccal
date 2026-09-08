@@ -304,3 +304,13 @@ void expr_render(const Expr *e, String *sb)
             UNREACHABLE();
     }
 }
+
+void module_free(Module *m)
+{
+    DA_FOR(m, i)
+    {
+        Expr *e = da_at(m, i);
+        expr_destroy(&e);
+    }
+    da_free(m);
+}

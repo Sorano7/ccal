@@ -251,3 +251,11 @@ TEST(hole_identifier)
         CUT_CHECK(val.kind == VAL_VOID);
     END();
 }
+
+TEST(multi_expression)
+{
+    START();
+        EVAL("'x = 100; 'x * 2", &val);
+        NUM_EQ(&val, 200, 1);
+    END();
+}

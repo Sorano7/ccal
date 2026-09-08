@@ -652,9 +652,27 @@ bool vm_eval_expr(VM *v, Expr *e, Value *out)
 // Run and evaluate a source.
 bool vm_run(VM *v, StringView src, Value *out)
 {
-    Expr *e = parse(src, v->base);
-    bool ok = vm_eval_expr(v, e, out);
-    expr_destroy(&e);
+    Module m;
+    da_init(&m);
+
+    bool ok = parse_module(src, v->base, &m);
+    if (!ok)
+    {
+        value_error(out, m.data[0]);
+        module_free(&m);
+    }
+
+    DA_FOR(&m, i)
+    {
+        Expr *e = da_at(&m, i);
+        if (!vm_eval_expr(v, e, out))
+        {
+            module_free(&m);
+            return false;
+        }
+        expr_destroy(&e);
+    }
+
     return ok;
 }
 

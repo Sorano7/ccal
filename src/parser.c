@@ -39,6 +39,7 @@
     X(TOK_RPAREN,    ")") \
 \
     X(TOK_BACKSLASH, "\\") \
+    X(TOK_SQUOTE,    "'") \
     X(TOK_ID,        "identifier") \
     X(TOK_ASSIGN,    "=") \
 \
@@ -108,6 +109,7 @@ static TokenKind token_kind_get(StringView src)
         case '$':  return TOK_DOLLAR;
         case '?':  return TOK_QUESTION;
         case '|':  return TOK_BAR;
+        case '\'': return TOK_SQUOTE;
 
         case '=':
             return next == '=' ? TOK_EQ : TOK_ASSIGN;
@@ -245,7 +247,7 @@ static bool tokenize(TokenArray *ta, StringView src)
                 i += build_number_token(ta, SRC, i);
                 break;
 
-            case TOK_UNDER:
+            case TOK_SQUOTE:
                 i += build_id_token(ta, SRC, i);
                 break;
 
@@ -643,8 +645,6 @@ static Expr *parse_neg(Parser *p)
 static Expr *parse_ident(Parser *p)
 {
     Token t = token(p);
-    if (t.value.len < 2)
-        return expr_err(token_span(t), "Expected identifier");
     CONSUME_EXPECT(p, TOK_ID);
     return expr_id(token_span(t), t.value);
 }

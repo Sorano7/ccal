@@ -247,37 +247,87 @@ static bool eval_number(Expr *e, Value *out)
     return true;
 }
 
-// Evaluate an identifier
-static bool eval_ident(VM *v, Expr *e, Value *out)
+#define ID_PREFIX "'"
+
+// A function to evaluate a builtin identifier.
+typedef bool (*BuiltinIdFn)(VM *, Expr *, Value *);
+
+static bool eval_builtin_true(VM *v, Expr *e, Value *out)
 {
-    if (sv_equal(e->as.id, "_true"))
-    {
-        value_bool(out, e->span, true);
-    }
-    else if (sv_equal(e->as.id, "_false"))
-    {
-        value_bool(out, e->span, false);
-    }
-    else if (sv_equal(e->as.id, "_ans"))
-    {
-        if (v->last)
-            value_set(out, v->last);
-    }
-    else 
-    {
-        if (!symbol_get(v->scope, SV(e->as.id), out))
-            return errorf(out, e->span, "undefined symbol");
-    }
+    (void)v;
+    value_bool(out, e->span, true);
     return true;
 }
 
-static bool is_builtin(StringView id)
+static bool eval_builtin_false(VM *v, Expr *e, Value *out)
 {
-    if (sv_equal(id, "_true")) return true;
-    if (sv_equal(id, "_false")) return true;
-    if (sv_equal(id, "_ans")) return true;
-    if (sv_equal(id, "_self")) return true;
-    return false;
+    (void)v;
+    value_bool(out, e->span, false);
+    return true;
+}
+
+static bool eval_builtin_ans(VM *v, Expr *e, Value *out)
+{
+    (void)e;
+    if (v->last)
+        value_set(out, v->last);
+    return true;
+}
+
+static bool eval_builtin_hole(VM *v, Expr *e, Value *out)
+{
+    (void)v; (void)e;
+    out->kind = VAL_VOID;
+    return true;
+}
+
+// List of builtin identifiers.
+typedef enum
+{
+    BUILTIN_NONE,
+    BUILTIN_HOLE,
+    BUILTIN_TRUE,
+    BUILTIN_FALSE,
+    BUILTIN_ANS,
+} BuiltinId;
+
+// Lookup for evaluation functions for builtin identifiers.
+static const BuiltinIdFn builtin_id_eval[] = {
+    [BUILTIN_NONE]  = NULL,
+    [BUILTIN_HOLE]  = eval_builtin_hole,
+    [BUILTIN_TRUE]  = eval_builtin_true,
+    [BUILTIN_FALSE] = eval_builtin_false,
+    [BUILTIN_ANS]   = eval_builtin_ans,
+};
+
+// Convert an identifier to a builtin.
+static BuiltinId id_to_builtin(Expr *e)
+{
+    if (e->kind != EXPR_IDENT || e->as.id.len <= 1)
+        return BUILTIN_NONE;
+
+    StringView name = sv_slice(SV(e->as.id),.from=1);
+    if (sv_equal(name, "_"))     return BUILTIN_HOLE;
+    if (sv_equal(name, "true"))  return BUILTIN_TRUE;
+    if (sv_equal(name, "false")) return BUILTIN_FALSE;
+    if (sv_equal(name, "ans"))   return BUILTIN_ANS;
+
+    return BUILTIN_NONE;
+}
+
+// Evaluate an identifier
+static bool eval_ident(VM *v, Expr *e, Value *out)
+{
+    if (e->as.id.len <= 1)
+        return errorf(out, e->span, "Empty identifier");
+
+    BuiltinId builtin = id_to_builtin(e);
+    if (builtin != BUILTIN_NONE)
+        return builtin_id_eval[builtin](v, e, out);
+
+    if (!symbol_get(v->scope, SV(e->as.id), out))
+        return errorf(out, e->span, "undefined symbol");
+    return true;
 }
 
 // Evaluate a prefix expression.
@@ -386,16 +436,21 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
 
     if (l->kind != EXPR_IDENT)
         return errorf(out, l->span, "Expected identifier");
-    if (is_builtin(SV(l->as.id)))
+
+    BuiltinId builtin = id_to_builtin(l);
+    if (builtin != BUILTIN_NONE && builtin != BUILTIN_HOLE)
         return errorf(out, l->span, "Cannot assign to builtin identifier");
 
     if (!vm_eval_expr(v, e->as.infix.right, out))
         return false;
 
-    if (out->kind == VAL_LAMBDA)
-        symbol_set(out->as.lambda.env, SV(l->as.id), out);
+    if (builtin != BUILTIN_HOLE)
+    {
+        if (out->kind == VAL_LAMBDA)
+            symbol_set(out->as.lambda.env, SV(l->as.id), out);
 
-    symbol_set(v->scope, SV(l->as.id), out);
+        symbol_set(v->scope, SV(l->as.id), out);
+    }
     return true;
 }
 
@@ -403,10 +458,10 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
 static Expr *bool_as_lambda(Value *b)
 {
     return expr_lambda(
-            expr_id(b->span, SV("_x")),
+            expr_id(b->span, SV(ID_PREFIX"x")),
             expr_lambda(
-                expr_id(b->span, SV("_y")),
-                expr_id(b->span, b->as.boolean ? SV("_x") : SV("_y"))
+                expr_id(b->span, SV(ID_PREFIX"y")),
+                expr_id(b->span, b->as.boolean ? SV(ID_PREFIX"x") : SV(ID_PREFIX"y"))
             )
         );
 }
@@ -657,7 +712,7 @@ static void value_render_error(Value *v, String *sb, RenderCtx *ctx)
 static void value_render_bool(Value *v, String *sb, RenderCtx *ctx)
 {
     if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-    str_appendf(sb, "_%s", v->as.boolean ? "true" : "false");
+    str_appendf(sb, ID_PREFIX"%s", v->as.boolean ? "true" : "false");
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 
@@ -737,23 +792,16 @@ void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
 void vm_env_render(VM *v, String *sb, RenderCtx *ctx)
 {
     Scope *scope = v->scope;
-    int lvl = 0;
+    if (ctx->use_color) str_appendf(sb, ACOLOR_CYAN);
+    str_appendf(sb, "Env (%zu)\n", scope->len);
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 
-    while (scope)
+    DA_FOR(v->scope, i)
     {
-        if (ctx->use_color) str_appendf(sb, ACOLOR_CYAN);
-        str_appendf(sb, "Scope (%d)\n", lvl);
-        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-
-        DA_FOR(v->scope, i)
-        {
-            Symbol sym = da_at(v->scope, i);
-            str_appendf(sb, "    "SV_FMT" = ", SV_ARG(SV(sym.id)));
-            vm_value_render(&sym.value, sb, ctx);
-            str_append(sb, "\n");
-        }
-        scope = scope->parent;
-        lvl++;
+        Symbol sym = da_at(v->scope, i);
+        str_appendf(sb, "    "SV_FMT" = ", SV_ARG(SV(sym.id)));
+        vm_value_render(&sym.value, sb, ctx);
+        str_append(sb, "\n");
     }
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }

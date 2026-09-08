@@ -750,13 +750,14 @@ static void render_with_subst(Scope *s, Expr *e, String *sb, RenderCtx *ctx)
         case EXPR_IDENT:
             if (symbol_get(s, SV(e->as.id), &tmp))
             {
-                vm_value_render(&tmp, sb, ctx);
-                if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+                if (tmp.kind != VAL_LAMBDA || s != tmp.as.lambda.env)
+                {
+                    vm_value_render(&tmp, sb, ctx);
+                    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+                    break;
+                }
             }
-            else
-            {
-                expr_render(e, sb);
-            }
+            expr_render(e, sb);
             break;
 
         case EXPR_PREFIX:

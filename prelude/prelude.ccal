@@ -1,4 +1,8 @@
 'nil  = 'n: 'c: 'n
 'cons = 'x: 'xs: 'n: 'c: 'c 'x 'xs
+
 'head = 'l: 'l 'nil ('x: 'xs: 'x)
 'tail = 'l: 'l 'nil ('x: 'xs: 'xs)
+
+'foldr = 'f: 'z: 'l: 'l 'z ('x: 'xs: 'f 'x $ 'foldr 'f 'z 'xs)
+'map   = 'f: 'l: 'l 'nil ('x: 'xs: 'cons ('f 'x) ('map 'f 'xs))

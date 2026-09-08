@@ -62,12 +62,12 @@ The base annotation scopes to a single expression.
 
 ## Variables
 
-Variables are prefixed with `_` to distinguish from digits.
+Variables are prefixed with `'` to distinguish from digits.
 
 ```
-_foo = 42
-_x = _y = _foo * 2
-_true, _false, _ans, ...
+'foo = 42
+'x = 'y = 'foo * 2
+'true, 'false, 'ans, ...
 ```
 
 ## Lambdas
@@ -75,10 +75,10 @@ _true, _false, _ans, ...
 Defined as `<param> : <body>`.
 
 ```
-_x: _x + 1       -- fn (x) x + 1
-_x: _y: _x _y    -- fn (x) fn (y) x + y
+'x: 'x + 1       -- fn (x) x + 1
+'x: 'y: 'x 'y    -- fn (x) fn (y) x + y
 ```
 
 Two ways of application:
-1. White space (left-associative): `_f _x`.
-2. Dollar sign (right-associative): `_f $ _g _x`.
+1. White space (left-associative): `'f 'x`.
+2. Dollar sign (right-associative): `'f $ 'g 'x`.

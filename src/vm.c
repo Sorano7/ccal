@@ -457,12 +457,13 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
 // Convert a bool value to a church-boolean function.
 static Expr *bool_as_lambda(Value *b)
 {
+    StringView p1 = b->as.boolean ? SV(ID_PREFIX"x") : SV(ID_PREFIX"_");
+    StringView p2 = b->as.boolean ? SV(ID_PREFIX"_") : SV(ID_PREFIX"y");
+    StringView rt = b->as.boolean ? p1 : p2;
+
     return expr_lambda(
-            expr_id(b->span, SV(ID_PREFIX"x")),
-            expr_lambda(
-                expr_id(b->span, SV(ID_PREFIX"y")),
-                expr_id(b->span, b->as.boolean ? SV(ID_PREFIX"x") : SV(ID_PREFIX"y"))
-            )
+            expr_id(b->span, p1),
+            expr_lambda(expr_id(b->span, p2), expr_id(b->span, rt))
         );
 }
 
@@ -757,7 +758,7 @@ static void render_with_subst(Scope *s, Expr *e, String *sb, RenderCtx *ctx)
                     break;
                 }
             }
-            expr_render(e, sb);
+                expr_render(e, sb);
             break;
 
         case EXPR_PREFIX:

@@ -432,6 +432,8 @@ TEST(application_precedence)
                 )
             ));
 
+    PARSE_FAIL("1'x", 10); // whitespace required
+
     expr_destroy(&e);
 }
 

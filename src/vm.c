@@ -666,9 +666,8 @@ bool vm_run(VM *v, StringView src, Value *out)
             module_free(&m);
             return false;
         }
-        expr_destroy(&e);
     }
-
+    module_free(&m);
     return ok;
 }
 
@@ -730,21 +729,35 @@ static void value_render_bool(Value *v, String *sb, RenderCtx *ctx)
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 
+static bool svlist_contains(SVList *sl, StringView v)
+{
+    DA_FOR(sl, i)
+    {
+        if (sv_equal(da_at(sl, i), v))
+            return true;
+    }
+    return false;
+}
+
 // Render an expression with identifiers substituted.
-static void render_with_subst(Scope *s, Expr *e, String *sb, RenderCtx *ctx)
+static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, RenderCtx *ctx)
 {
     Value tmp = {0};
 
     switch (e->kind)
     {
         case EXPR_LAMBDA:
+            str_appendf(sb, "(");
             expr_render(e->as.lambda.param, sb);
+            if (e->as.lambda.param->kind == EXPR_IDENT)
+                da_append(params, SV(e->as.lambda.param->as.id));
             str_appendf(sb, " : ");
-            render_with_subst(s, e->as.lambda.body, sb, ctx);
+            render_with_subst(s, e->as.lambda.body, params, sb, ctx);
+            str_appendf(sb, ")");
             break;
 
         case EXPR_IDENT:
-            if (symbol_get(s, SV(e->as.id), &tmp))
+            if (!svlist_contains(params, SV(e->as.id)) && symbol_get(s, SV(e->as.id), &tmp))
             {
                 if (tmp.kind != VAL_LAMBDA || s != tmp.as.lambda.env)
                 {
@@ -758,16 +771,16 @@ static void render_with_subst(Scope *s, Expr *e, String *sb, RenderCtx *ctx)
 
         case EXPR_PREFIX:
             str_appendf(sb, " %s", op_to_str[e->as.prefix.op]);
-            render_with_subst(s, e->as.prefix.expr, sb, ctx);
+            render_with_subst(s, e->as.prefix.expr, params, sb, ctx);
             break;
 
         case EXPR_INFIX:
-            render_with_subst(s, e->as.infix.left, sb, ctx);
+            render_with_subst(s, e->as.infix.left, params, sb, ctx);
             if (e->as.infix.op == OP_APPLY)
                 str_appendf(sb, " ");
             else
                 str_appendf(sb, " %s ", op_to_str[e->as.infix.op]);
-            render_with_subst(s, e->as.infix.right, sb, ctx);
+            render_with_subst(s, e->as.infix.right, params, sb, ctx);
             break;
 
         default:
@@ -782,9 +795,15 @@ static void value_render_lambda(Value *v, String *sb, RenderCtx *ctx)
 {
     if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
 
-    Expr *e = v->as.lambda.expr;
-    render_with_subst(v->as.lambda.env, e, sb, ctx);
+    SVList sl;
+    da_init(&sl);
 
+    Expr *e = v->as.lambda.expr;
+    if (e->as.lambda.param->kind == EXPR_IDENT)
+        da_append(&sl, SV(e->as.lambda.param->as.id));
+    render_with_subst(v->as.lambda.env, e, &sl, sb, ctx);
+
+    da_free(&sl);
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 

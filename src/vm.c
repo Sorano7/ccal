@@ -247,8 +247,6 @@ static bool eval_number(Expr *e, Value *out)
     return true;
 }
 
-#define ID_PREFIX "'"
-
 // A function to evaluate a builtin identifier.
 typedef bool (*BuiltinIdFn)(VM *, Expr *, Value *);
 
@@ -303,10 +301,10 @@ static const BuiltinIdFn builtin_id_eval[] = {
 // Convert an identifier to a builtin.
 static BuiltinId id_to_builtin(Expr *e)
 {
-    if (e->kind != EXPR_IDENT || e->as.id.len <= 1)
+    if (e->kind != EXPR_IDENT)
         return BUILTIN_NONE;
 
-    StringView name = sv_slice(SV(e->as.id),.from=1);
+    StringView name = SV(e->as.id);
     if (sv_equal(name, "_"))     return BUILTIN_HOLE;
     if (sv_equal(name, "true"))  return BUILTIN_TRUE;
     if (sv_equal(name, "false")) return BUILTIN_FALSE;
@@ -318,9 +316,6 @@ static BuiltinId id_to_builtin(Expr *e)
 // Evaluate an identifier
 static bool eval_ident(VM *v, Expr *e, Value *out)
 {
-    if (e->as.id.len <= 1)
-        return errorf(out, e->span, "Empty identifier");
-
     BuiltinId builtin = id_to_builtin(e);
     if (builtin != BUILTIN_NONE)
         return builtin_id_eval[builtin](v, e, out);
@@ -457,8 +452,8 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
 // Convert a bool value to a church-boolean function.
 static Expr *bool_as_lambda(Value *b)
 {
-    StringView p1 = b->as.boolean ? SV(ID_PREFIX"x") : SV(ID_PREFIX"_");
-    StringView p2 = b->as.boolean ? SV(ID_PREFIX"_") : SV(ID_PREFIX"y");
+    StringView p1 = b->as.boolean ? SV("x") : SV("_");
+    StringView p2 = b->as.boolean ? SV("_") : SV("y");
     StringView rt = b->as.boolean ? p1 : p2;
 
     return expr_lambda(
@@ -659,7 +654,7 @@ bool vm_run(VM *v, StringView src, Value *out)
     bool ok = parse_module(src, v->base, &m);
     if (!ok)
     {
-        value_error(out, m.data[0]);
+        value_error(out, da_last(&m));
         module_free(&m);
     }
 
@@ -731,7 +726,7 @@ static void value_render_error(Value *v, String *sb, RenderCtx *ctx)
 static void value_render_bool(Value *v, String *sb, RenderCtx *ctx)
 {
     if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-    str_appendf(sb, ID_PREFIX"%s", v->as.boolean ? "true" : "false");
+    str_appendf(sb, "'%s", v->as.boolean ? "true" : "false");
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 
@@ -758,7 +753,7 @@ static void render_with_subst(Scope *s, Expr *e, String *sb, RenderCtx *ctx)
                     break;
                 }
             }
-                expr_render(e, sb);
+            expr_render(e, sb);
             break;
 
         case EXPR_PREFIX:

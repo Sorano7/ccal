@@ -11,10 +11,13 @@
     X(TOK_NEWLINE,   "\n") \
     X(TOK_SEMICOLON, ";") \
     X(TOK_INVALID,   "<invalid>") \
+    X(TOK_ERROR,     "<error>") \
 \
     X(TOK_ALPHA,     "alphabets") \
     X(TOK_DIGIT,     "digits") \
     X(TOK_ALNUM,     "alphanumerics") \
+    X(TOK_ID,        "identifier") \
+    X(TOK_INFIX_ID,  "infix identifier") \
 \
     X(TOK_PLUS,      "+") \
     X(TOK_MINUS,     "-") \
@@ -40,15 +43,14 @@
     X(TOK_LPAREN,    "(") \
     X(TOK_RPAREN,    ")") \
 \
-    X(TOK_BACKSLASH, "\\") \
     X(TOK_SQUOTE,    "'") \
-    X(TOK_ID,        "identifier") \
     X(TOK_ASSIGN,    "=") \
 \
     X(TOK_COLON,     ":") \
     X(TOK_DOLLAR,    "$") \
     X(TOK_QUESTION,  "?") \
-    X(TOK_BAR,       "|")
+    X(TOK_BAR,       "|") \
+    X(TOK_BACKTICK,  "`")
 
 #define AS_ENUM(name, _) name,
 #define AS_STR(name, s)  [name] = (s),
@@ -62,9 +64,10 @@ typedef enum
 // A token.
 typedef struct
 {
-    StringView value;
-    size_t pos;
+    String value;
+    Span span;
     TokenKind kind;
+
     bool ws_prefix;
     bool ws_suffix;
 } Token;
@@ -75,6 +78,15 @@ typedef struct
     size_t len;
     size_t cap;
 } TokenArray;
+
+static void token_array_free(TokenArray *ta)
+{
+    DA_FOR(ta, i)
+    {
+        str_free(&da_at(ta, i).value);
+    }
+    da_free(ta);
+}
 
 const char *tk_to_str[] = {TOKENS(AS_STR)};
 
@@ -102,12 +114,12 @@ static TokenKind token_kind_get(StringView src)
         case ')':  return TOK_RPAREN;
 
         case '_':  return TOK_UNDER;
-        case '\\': return TOK_BACKSLASH;
         case ':':  return TOK_COLON;
         case '$':  return TOK_DOLLAR;
         case '?':  return TOK_QUESTION;
         case '|':  return TOK_BAR;
         case '\'': return TOK_SQUOTE;
+        case '`':  return TOK_BACKTICK;
 
         case ';':  return TOK_SEMICOLON;
         case '\n': return TOK_NEWLINE;
@@ -148,20 +160,38 @@ static size_t token_len(TokenKind kind)
 }
 
 // Create a token.
-static inline Token token_create(TokenKind kind, StringView value, size_t pos)
+static inline void token_init(Token *t, TokenKind kind, StringView value, Span span)
 {
-    return (Token){.value=value, .pos=pos, .kind=kind, .ws_prefix=false, .ws_suffix=false};
+    t->kind = kind;
+    str_init_with(&t->value, value);
+    t->span = span;
+    t->ws_prefix = false;
+    t->ws_suffix = false;
 }
 
-// Construct a number token and return the length.
-static size_t build_number_token(TokenArray *ta, StringView src, size_t pos)
+static inline void token_errorf(Token *t, Span span, const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+
+    token_init(t, TOK_ERROR, SV(""), span);
+    str_appendvf(&t->value, fmt, args);
+
+    va_end(args);
+}
+
+#define SRC sv_slice(src, .from=i)
+
+// Construct a number token.
+static void build_number_token(Token *t, StringView src, size_t *pos)
 {
     TokenKind kind = TOK_DIGIT;
     size_t i = 0;
+    bool end = false;
+
     for (; i < src.len; i++)
     {
-        bool end = false;
-        switch (token_kind_get(sv_slice(src, .from=i)))
+        switch (token_kind_get(SRC))
         {
             case TOK_ALPHA:
                 kind = TOK_ALNUM;
@@ -177,18 +207,19 @@ static size_t build_number_token(TokenArray *ta, StringView src, size_t pos)
         if (end) break;
     }
 
-    da_append(ta, token_create(kind, sv_slice(src, .to=i), pos));
-    return i;
+    token_init(t, kind, sv_slice(src, .to=i), (Span){*pos, *pos+i});
+    *pos += i;
 }
 
-// Construct an identifier and return the length.
-static size_t build_id_token(TokenArray *ta, StringView src, size_t pos)
+// Construct an identifier token.
+static bool build_id_token(Token *t, StringView src, size_t *pos)
 {
     size_t i = 1;
+    bool end = false;
+
     for (; i < src.len; i++)
     {
-        bool end = false;
-        switch (token_kind_get(sv_slice(src, .from=i)))
+        switch (token_kind_get(SRC))
         {
             case TOK_ALPHA:
             case TOK_DIGIT:
@@ -201,26 +232,77 @@ static size_t build_id_token(TokenArray *ta, StringView src, size_t pos)
         }
         if (end) break;
     }
-    src = sv_slice(src, .to=i);
 
-    da_append(ta, token_create(TOK_ID, src, pos));
-    return i;
+    if (i == 1)
+    {
+        token_errorf(t, (Span){*pos, *pos+i}, "Empty indentifier");
+        return false;
+    }
+
+    token_init(t, TOK_ID, sv_slice(src, .from=1, .to=i), (Span){*pos, *pos+i});
+    *pos += i;
+    return true;
+}
+
+// Construct a infix identifier token.
+static bool build_infix_id_token(Token *t, StringView src, size_t *pos)
+{
+    size_t i = 1;
+    bool end = false;
+    bool closed = false;
+
+    for (; i < src.len; i++)
+    {
+        switch (token_kind_get(SRC))
+        {
+            case TOK_ALPHA:
+            case TOK_DIGIT:
+            case TOK_UNDER:
+                break;
+
+            case TOK_BACKTICK:
+                i++;
+                closed = true;
+                break;
+
+            default:
+                end = true;
+                break;
+        }
+        if (closed || end) break;
+    }
+
+    if (!closed)
+    {
+        token_errorf(t, (Span){*pos+i, *pos+i+1}, "Expected '`'");
+        return false;
+    }
+
+    if (i-1 < 2)
+    {
+        token_errorf(t, (Span){*pos, *pos+i}, "Empty infix indentifier");
+        return false;
+    }
+
+    token_init(t, TOK_INFIX_ID, sv_slice(src, .from=1, .to=i-1), (Span){*pos, *pos+i});
+    *pos += i;
+    return true;
 }
 
 // Tokenize the source.
 static bool tokenize(TokenArray *ta, StringView src)
 {
-#define SET_SUFFIX() do { \
-} while (0)
-
-#define SRC sv_slice(src, .from=i)
-
     bool pending_space = false;
 
     size_t i = 0;
+    Token t = {0};
+
     while (i < src.len)
     {
         TokenKind kind = token_kind_get(SRC);
+        size_t len = token_len(kind);
+        Span span = {i, i+len};
+        bool ok = true;
 
         if (kind == TOK_SPACE)
         {
@@ -240,8 +322,8 @@ static bool tokenize(TokenArray *ta, StringView src)
         switch (kind)
         {
             case TOK_INVALID:
-                da_reset(ta);
-                da_append(ta, token_create(kind, SV(" "), i));
+                token_errorf(&t, span, "Invalid token");
+                da_append(ta, t);
                 return false;
 
             case TOK_SPACE:
@@ -249,16 +331,25 @@ static bool tokenize(TokenArray *ta, StringView src)
 
             case TOK_DIGIT:
             case TOK_ALPHA:
-                i += build_number_token(ta, SRC, i);
+                build_number_token(&t, SRC, &i);
+                da_append(ta, t);
                 break;
 
             case TOK_SQUOTE:
-                i += build_id_token(ta, SRC, i);
+                ok = build_id_token(&t, SRC, &i);
+                da_append(ta, t);
+                if (!ok) return false;
+                break;
+
+            case TOK_BACKTICK:
+                ok = build_infix_id_token(&t, SRC, &i);
+                da_append(ta, t);
+                if (!ok) return false;
                 break;
 
             default:
-                size_t len = token_len(kind);
-                da_append(ta, token_create(kind, sv_slice(src, .from=i, .to=i+len), i));
+                token_init(&t, kind, sv_slice(src, .from=i, .to=i+len), span);
+                da_append(ta, t);
                 i += len;
                 break;
         }
@@ -270,10 +361,8 @@ static bool tokenize(TokenArray *ta, StringView src)
         }
     }
 
-    da_append(ta, token_create(TOK_EOF, SV(" "), i));
-
-#undef SET_SUFFIX
-#undef SRC
+    token_init(&t, TOK_EOF, SV(" "), (Span){i, i+1});
+    da_append(ta, t);
     return true;
 }
 
@@ -332,6 +421,7 @@ static OpPrec token_prec(Token t)
             return PREC_ASSIGN;
 
         case TOK_DOLLAR:
+        case TOK_INFIX_ID:
             return PREC_APPLY;
 
         default:
@@ -400,14 +490,14 @@ typedef struct
 #define token(p)    peek(p, 0)
 #define tprec(p)    token_prec(token(p))
 #define tkind(p)    token(p).kind
-#define tspan(p)    token_span(token(p))
+#define tspan(p)    token(p).span
 #define is_alnum(p) (tkind(p) == TOK_ALNUM || tkind(p) == TOK_DIGIT)
 #define is_dlist(p) (tkind(p) == TOK_LBRAC)
 #define is_sexpr(p) (is_alnum(p) || is_dlist(p) || tkind(p) == TOK_LPAREN)
 
 #define CONSUME_EXPECT(p, k) do { \
     if (tkind(p) != k) \
-        return expr_err(token_span(token(p)), "Expected '%s'", tk_to_str[k]); \
+        return expr_err(tspan(p), "Expected '%s'", tk_to_str[k]); \
     (p)->pos++; \
 } while (0)
 
@@ -447,22 +537,19 @@ static bool token_to_ul(Token t, unsigned long *out)
     return errno != ERANGE;
 }
 
-// Get the span of the token.
-static inline Span token_span(Token t)
-{
-    return (Span){t.pos, t.pos+t.value.len};
-}
-
 // Parse an alphanumeric number part, return error.
-static Expr *parse_number_part_alnum(Parser *p, DigitArray *ds, Span *out)
+static Expr *parse_number_part_alnum(Parser *p, DigitArray *ds, bool has_base, Span *out)
 {
     Token t = token(p);
-    Span s = token_span(t);
+    Span s = t.span;
 
     if (!is_alnum(p))
         return expr_err(s, "Expected alphanumerics");
 
-    DigitResult res = digits_from_alnum(ds, t.value, p->base);
+    StringView src = SV(t.value);
+    if (has_base) sv_shift(&src, 2);
+
+    DigitResult res = digits_from_alnum(ds, src, p->base);
     s.from += res.pos;
     s.to = s.from+1;
 
@@ -473,12 +560,12 @@ static Expr *parse_number_part_alnum(Parser *p, DigitArray *ds, Span *out)
         case DIGIT_OOB:
             return expr_err(s, "Digit out of bounds for base %lu", p->base);
         case DIGIT_BASE_TOO_LARGE:
-            return expr_err(token_span(t), "Base too large for alphanumeric spelling");
+            return expr_err(t.span, "Base too large for alphanumeric spelling");
         default:
             break;
     }
     p->pos++;
-    out->to = token_span(t).to;
+    out->to = t.span.to;
     return NULL;
 }
 
@@ -486,7 +573,7 @@ static Expr *parse_number_part_alnum(Parser *p, DigitArray *ds, Span *out)
 static Expr *parse_number_part_dlist(Parser *p, DigitArray *ds, Span *out)
 {
     Token t = token(p);
-    Span s = token_span(t);
+    Span s = t.span;
 
     if (!is_dlist(p))
         return expr_err(s, "Expected digit list");
@@ -496,11 +583,11 @@ static Expr *parse_number_part_dlist(Parser *p, DigitArray *ds, Span *out)
         {
             t = token(p);
             if (tkind(p) != TOK_DIGIT)
-                return expr_err(token_span(t), "Expected numeric value as digit");
+                return expr_err(t.span, "Expected numeric value as digit");
 
             unsigned long val;
             if (!token_to_ul(t, &val) || val >= p->base)
-                return expr_err(token_span(t), "Digit out of bounds");
+                return expr_err(t.span, "Digit out of bounds");
 
             da_append(ds, val);
             p->pos++;
@@ -515,12 +602,12 @@ static Expr *parse_number_part_dlist(Parser *p, DigitArray *ds, Span *out)
 
 // Parse a number part (I, N, or R) into a sequence of digits.
 // Ensure the number is in the same format as fmt.
-static Expr *parse_number_part(Parser *p, DigitArray *ds, DigitFormat fmt, Span *out)
+static Expr *parse_number_part(Parser *p, DigitArray *ds, DigitFormat fmt, bool has_base, Span *out)
 {
     switch (fmt)
     {
         case DIGIT_FMT_ALNUM:
-            return parse_number_part_alnum(p, ds, out);
+            return parse_number_part_alnum(p, ds, has_base, out);
 
         case DIGIT_FMT_LIST:
             return parse_number_part_dlist(p, ds, out);
@@ -531,22 +618,21 @@ static Expr *parse_number_part(Parser *p, DigitArray *ds, DigitFormat fmt, Span 
 }
 
 // Try parsing a base prefix in the form of a leading zero.
-static void try_parse_base_prefix(Token *t, unsigned long *base)
+static bool try_parse_base_prefix(Token *t, unsigned long *base)
 {
-    if (t->kind != TOK_ALNUM) return;
+    if (t->kind != TOK_ALNUM) return false;
 
-    if (sv_startswith(t->value, SV("0x")))
+    if (sv_startswith(SV(t->value), SV("0x")))
         *base = 16;
-    else if (sv_startswith(t->value, SV("0b")))
+    else if (sv_startswith(SV(t->value), SV("0b")))
         *base = 2;
-    else if (sv_startswith(t->value, SV("0o")))
+    else if (sv_startswith(SV(t->value), SV("0o")))
         *base = 8;
-    else if (sv_startswith(t->value, SV("0d")))
+    else if (sv_startswith(SV(t->value), SV("0d")))
         *base = 10;
     else
-        return;
-
-    sv_shift(&t->value, 2);
+        return false;
+    return true;
 }
 
 // Parse a number literal in the form of I.N(R).
@@ -559,9 +645,9 @@ static Expr *parse_number(Parser *p, DigitFormat fmt)
     literal_init(&lit);
 
     unsigned long prev_base = p->base;
-    try_parse_base_prefix(&token(p), &p->base);
+    bool has_base = try_parse_base_prefix(&token(p), &p->base);
 
-    if ((e = parse_number_part(p, &lit.I, fmt, &s)))
+    if ((e = parse_number_part(p, &lit.I, fmt, has_base, &s)))
         goto cleanup;
 
     if (tkind(p) != TOK_DOT)
@@ -570,14 +656,14 @@ static Expr *parse_number(Parser *p, DigitFormat fmt)
 
     if (tkind(p) != TOK_LPAREN)
     {
-        if ((e = parse_number_part(p, &lit.N, fmt, &s)))
+        if ((e = parse_number_part(p, &lit.N, fmt, false, &s)))
             goto cleanup;
     }
 
     if (tkind(p) == TOK_LPAREN)
     {
         p->pos++;
-        if ((e = parse_number_part(p, &lit.R, fmt, &s)))
+        if ((e = parse_number_part(p, &lit.R, fmt, false, &s)))
             goto cleanup;
 
         if (tkind(p) != TOK_RPAREN)
@@ -602,7 +688,7 @@ cleanup:
 static Expr *parse_base_tag(Parser *p)
 {
     Token t = token(p);
-    Span s = token_span(t);
+    Span s = t.span;
 
     CONSUME_EXPECT(p, TOK_DIGIT);
     CONSUME_EXPECT(p, TOK_HASH);
@@ -651,7 +737,7 @@ static Expr *parse_ident(Parser *p)
 {
     Token t = token(p);
     CONSUME_EXPECT(p, TOK_ID);
-    return expr_id(token_span(t), t.value);
+    return expr_id(t.span, SV(t.value));
 }
 
 // Parse a lambda expression.
@@ -728,11 +814,30 @@ static Expr *parse_cond(Parser *p, Expr *if_)
     return expr_cond(if_, then, else_);
 }
 
+// Parse an infix application of an identifier.
+static Expr *parse_infix_apply(Parser *p, Expr *left)
+{
+    Expr *f = expr_id(tspan(p), SV(token(p).value));
+    p->pos++;
+
+    Expr *right = parse_expr(p, PREC_PRIMARY);
+    if (is_error(right))
+    {
+        expr_destroy(&f);
+        return right;
+    }
+
+    return expr_infix(expr_infix(f, OP_APPLY, left), OP_APPLY, right);
+}
+
 // Parse a left denotation expression
 static Expr *parse_led(Parser *p, int prec, Expr *left)
 {
     if (tkind(p) == TOK_QUESTION)
         return parse_cond(p, left);
+
+    if (tkind(p) == TOK_INFIX_ID)
+        return parse_infix_apply(p, left);
 
     Operator op = token_to_op(token(p));
     switch (op)
@@ -801,8 +906,14 @@ bool parse_module(StringView src, unsigned long base, Module *m)
 
     if (!tokenize(&ta, src))
     {
-        e = expr_err(token_span(ta.data[0]), "Invalid token");
-        goto error;
+        Token err = da_last(&ta);
+        if (err.kind == TOK_ERROR)
+        {
+            e = expr_err(err.span, SV_FMT, SV_ARG(SV(err.value)));
+            da_append(m, e);
+        }
+        ok = false;
+        goto cleanup;
     }
 
     Parser p = {
@@ -814,8 +925,13 @@ bool parse_module(StringView src, unsigned long base, Module *m)
     for (;;)
     {
         e = parse_expr(&p, PREC_PRIMARY);
-        if (is_error(e)) goto error;
         da_append(m, e);
+
+        if (is_error(e))
+        {
+            ok = false;
+            goto cleanup;
+        }
 
         TokenKind tk = tkind(&p);
         if (tk == TOK_EOF) break;
@@ -823,20 +939,17 @@ bool parse_module(StringView src, unsigned long base, Module *m)
         if (tk != TOK_NEWLINE && tk != TOK_SEMICOLON)
         {
             e = expr_err(tspan(&p), "Trailing characters");
-            goto error;
+            da_append(m, e);
+            ok = false;
+            goto cleanup;
         }
 
         for (; tk == TOK_NEWLINE || tk == TOK_SEMICOLON; tk = tkind(&p))
             p.pos++;
     }
-    goto cleanup;
-
-error:
-    da_reset(m);
-    da_append(m, e);
 
 cleanup:
-    da_free(&ta);
+    token_array_free(&ta);
     return ok;
 }
 

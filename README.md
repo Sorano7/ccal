@@ -79,6 +79,7 @@ Defined as `<param> : <body>`.
 'x: 'y: 'x 'y    -- fn (x) fn (y) x + y
 ```
 
-Two ways of application:
+Three ways of application:
 1. White space (left-associative): `'f 'x`.
 2. Dollar sign (right-associative): `'f $ 'g 'x`.
+3. As infix: ``'x `f` 'y``

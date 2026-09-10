@@ -253,7 +253,7 @@ void expr_render(const Expr *e, String *sb)
     switch (e->kind)
     {
         case EXPR_IDENT:
-            str_appendf(sb, SV_FMT, SV_ARG(e->as.id));
+            str_appendf(sb, "'"SV_FMT, SV_ARG(e->as.id));
             break;
 
         case EXPR_NUMBER:

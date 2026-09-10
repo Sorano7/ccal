@@ -259,3 +259,12 @@ TEST(multi_expression)
         NUM_EQ(&val, 200, 1);
     END();
 }
+
+TEST(infix_application)
+{
+    START();
+        EVAL("'div = 'x: 'y: 'x / 'y", &val);
+        EVAL("1 `div` 2", &val);
+        NUM_EQ(&val, 1, 2);
+    END();
+}

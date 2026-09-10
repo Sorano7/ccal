@@ -22,9 +22,10 @@ Options include:
 ```
 -d | --decimal
 -r | --rational
--o | --obase    <n>
--i | --ibase    <n>
--t | --truncate <n>
+-o | --obase     <n>
+-i | --ibase     <n>
+-t | --truncate  <n>
+-p | --precision <n>
 ```
 
 Similar commands are available in REPL, prefixed with `:`.

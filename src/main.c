@@ -15,6 +15,7 @@ const char cli_help[] = "Commands:\n"
                         "    -r | --rational             set the output form to rational\n"
                         "    -o | --obase    n           set the output base to n\n"
                         "    -i | --ibase    n           set the default input base to n\n"
+                        "    -p | --prec     n           set the precision for real number\n"
                         "    -t | --truncate n           set the max number of digits in decimal form\n"
 ;
 
@@ -28,6 +29,7 @@ const char repl_help[] = "Commands:\n"
                          "    rat | rational        set the output form to rational\n"
                          "    ob  | obase=n         set the output base to n\n"
                          "    ib  | ibase=n         set the default input base to n\n"
+                         "    pr  | precision=n     set the precision for real number\n"
                          "    tr  | truncate=n      set the max number of digits in decimal form\n"
 ;
 
@@ -88,6 +90,11 @@ void repl_handle_set_command(VM *vm, RenderCtx *ctx, StringView src)
     {
         repl_set_param_value(src, &vm->base);
         printf("input base: %lu\n", vm->base);
+    }
+    else if (sv_equal(param, "pr") || sv_equal(param, "precision"))
+    {
+        repl_set_param_value(src, (unsigned long *)&ctx->prec);
+        printf("precision: %lu\n", ctx->prec);
     }
     else if (sv_equal(param, "tr") || sv_equal(param, "truncate"))
     {
@@ -204,7 +211,8 @@ int main(int argc, char **argv)
 
     RenderCtx ctx = {
         .base = 10,
-        .max_digits = 50,
+        .prec = 50,
+        .max_digits = 10,
         .num_form = NUMBER_RATIONAL,
         .use_color = isatty(fileno(stdout)),
     };

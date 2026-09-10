@@ -2,6 +2,7 @@
 #define VM_H
 
 #include "ast.h"
+#include "creal.h"
 #include <gmp.h>
 
 typedef struct Scope Scope;
@@ -12,9 +13,22 @@ typedef enum
     VAL_VOID,
     VAL_ERROR,
     VAL_NUMBER,
-    VAL_BOOL,
+    VAL_CREAL,
     VAL_LAMBDA,
+    VAL_BUILTIN,
 } ValueKind;
+
+typedef enum
+{
+    BUILTIN_NONE,
+    BUILTIN_HOLE,
+    BUILTIN_TRUE,
+    BUILTIN_FALSE,
+    BUILTIN_ANS,
+    BUILTIN_SQRT,
+} Builtin;
+
+extern const char *builtin_to_str[];
 
 // A value that an expression can evaluate to.
 typedef struct
@@ -23,9 +37,11 @@ typedef struct
     {
         String error;
 
+        Builtin builtin;
+
         mpq_t number;
 
-        bool boolean;
+        CRNode *creal;
 
         struct
         {
@@ -65,8 +81,11 @@ typedef struct
 {
     StringView src;
     NumberForm num_form;
+
+    mp_prec_t prec;
     unsigned long max_digits;
     unsigned long base;
+
     bool use_color;
 } RenderCtx;
 

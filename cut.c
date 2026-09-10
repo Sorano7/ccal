@@ -4,6 +4,7 @@
 void shared_config(CutUnit *u)
 {
     cut_unit_sources(u, "src/ast.c");
+    cut_unit_sources(u, "src/creal.c");
     cut_unit_sources(u, "src/number.c");
     cut_unit_sources(u, "src/lexer.c");
     cut_unit_sources(u, "src/parser.c");
@@ -11,7 +12,7 @@ void shared_config(CutUnit *u)
 
     cut_unit_includes(u, "include");
     cut_unit_flags(u, "-g", "-static", "-Wall", "-Wextra", "-Wno-override-init");
-    cut_unit_libs(u, "gmp");
+    cut_unit_libs(u, "mpfi", "mpfr", "gmp");
 }
 
 int main(int argc, char **argv)

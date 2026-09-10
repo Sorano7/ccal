@@ -238,3 +238,109 @@ void render_decimal(String *sb, const mpq_t n, int base, size_t max_digits)
 
     mpz_clears(num, den, intpart, rem, mul, digit, NULL);
 }
+
+void render_creal(String *sb, const mpfi_t n, int base, size_t max_digits)
+{
+    mpfr_prec_t prec = mpfi_get_prec(n);
+    mpfr_t lo, hi;
+    mpfr_inits2(prec, lo, hi, NULL);
+    mpfi_get_left(lo, n);
+    mpfi_get_right(hi, n);
+
+    if (mpfr_nan_p(lo) || mpfr_nan_p(hi))
+    {
+        str_append(sb, "NaN");
+        goto done;
+    }
+
+    int slo = mpfr_sgn(lo);
+    int shi = mpfr_sgn(hi);
+
+    if (mpfr_inf_p(lo) && mpfr_inf_p(hi) && slo == shi)
+    {
+        str_append(sb, slo < 0 ? "-Inf" : "Inf");
+        goto done;
+    }
+
+    if (mpfr_inf_p(lo) || mpfr_inf_p(hi))
+    {
+        str_append(sb, "?");
+        goto done;
+    }
+
+    int neg = (slo < 0 || (slo == 0 && shi < 0));
+
+    mpfr_t a, b;
+    mpfr_inits2(prec, a, b, NULL);
+
+    if (neg)
+    {
+        mpfr_neg(a, hi, MPFR_RNDN);
+        mpfr_neg(b, lo, MPFR_RNDN);
+    }
+    else
+    {
+        mpfr_set(a, lo, MPFR_RNDN);
+        mpfr_set(b, hi, MPFR_RNDN);
+    }
+
+    size_t req = max_digits + 2;
+    mpfr_exp_t exp_a, exp_b;
+    char *a_str = mpfr_get_str(NULL, &exp_a, base, req, a, MPFR_RNDD);
+    char *b_str = mpfr_get_str(NULL, &exp_b, base, req, b, MPFR_RNDU);
+
+    if (!a_str || !b_str)
+    {
+        str_append(sb, "?");
+        if (a_str) mpfr_free_str(a_str);
+        if (b_str) mpfr_free_str(b_str);
+        goto cleanup;
+    }
+
+    if (neg) str_append(sb, "-");
+
+    StringView as = SV(a_str);
+    StringView bs = SV(b_str);
+
+    size_t agree = 0;
+    if (exp_a == exp_b)
+    {
+        size_t lim = as.len < bs.len ? as.len : bs.len;
+        size_t available = lim;
+        if (lim > max_digits) lim = max_digits;
+        while (agree < lim && as.data[0] == bs.data[0]) agree++;
+
+        if (agree == 0)
+        {
+            str_append(sb, "?");
+        }
+        else
+        {
+            str_append(sb, as.data[0]);
+            if (agree > 1)
+            {
+                str_append(sb, ".");
+                str_append(sb, sv_slice(as, .from=1, .to=agree));
+            }
+
+            if (exp_a - 1 != 0)
+                str_appendf(sb, "e%+ld", (long)(exp_a - 1));
+
+            if (agree < max_digits || agree < available)
+                str_append(sb, "...");
+        }
+    }
+    else
+    {
+        str_append(sb, "?");
+    }
+
+    mpfr_free_str(a_str);
+    mpfr_free_str(b_str);
+
+cleanup:
+    mpfr_clears(a, b, NULL);
+
+done:
+    mpfr_clears(lo, hi, NULL);
+}

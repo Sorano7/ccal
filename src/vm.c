@@ -41,8 +41,15 @@ static const char *vk_to_str[] = {
     [VAL_VOID]    = "void",
     [VAL_ERROR]   = "error",
     [VAL_NUMBER]  = "number",
-    [VAL_BOOL]    = "bool",
     [VAL_LAMBDA]  = "lambda",
+};
+
+const char *builtin_to_str[] = {
+    [BUILTIN_TRUE]  = "true",
+    [BUILTIN_FALSE] = "false",
+    [BUILTIN_HOLE]  = "_",
+    [BUILTIN_ANS]   = "ans",
+    [BUILTIN_SQRT]  = "sqrt",
 };
 
 // Free the value.
@@ -53,6 +60,10 @@ void vm_value_free(Value *v)
     {
         case VAL_NUMBER:
             mpq_clear(v->as.number);
+            break;
+
+        case VAL_CREAL:
+            cr_free(v->as.creal);
             break;
 
         case VAL_ERROR:
@@ -72,8 +83,12 @@ void vm_value_free(Value *v)
             }
             break;
 
-        default:
+        case VAL_BUILTIN:
+        case VAL_VOID:
             break;
+
+        default:
+            UNREACHABLE();
     }
     memset(v, 0, sizeof(*v));
 }
@@ -87,13 +102,35 @@ static void value_number(Value *v, Span span)
     mpq_init(v->as.number);
 }
 
+// Initializes a CReal value.
+static void value_creal(Value *v, Span span, CRNode *n)
+{
+    assert(v);
+    v->kind = VAL_CREAL;
+    v->span = span;
+    v->as.creal = n;
+}
+
 // Initializes a bool value.
 static void value_bool(Value *v, Span span, bool b)
 {
     assert(v);
-    v->kind = VAL_BOOL;
+    v->kind = VAL_BUILTIN;
     v->span = span;
-    v->as.boolean = b;
+    v->as.builtin = b ? BUILTIN_TRUE : BUILTIN_FALSE;
+}
+
+static inline bool is_bool_value(Value *v)
+{
+    if (v->kind != VAL_BUILTIN)
+        return false;
+    return v->as.builtin == BUILTIN_TRUE || v->as.builtin == BUILTIN_FALSE;
+}
+
+static inline bool as_bool_value(Value *v)
+{
+    assert(is_bool_value(v));
+    return v->as.builtin == BUILTIN_TRUE;
 }
 
 // Initializes a lambda value.
@@ -105,6 +142,14 @@ static void value_lambda(Value *v, Expr *e, Scope *s)
     v->span = e->span;
     v->as.lambda.expr = expr_clone(e);
     v->as.lambda.env = s;
+}
+
+// Intializes a builtin value.
+static void value_builtin(Value *v, Builtin b)
+{
+    assert(v);
+    v->kind = VAL_BUILTIN;
+    v->as.builtin = b;
 }
 
 // Initializes an error value with message.
@@ -150,22 +195,27 @@ static void value_set(Value *v, const Value *from)
             mpq_canonicalize(v->as.number);
             break;
 
-        case VAL_BOOL:
-            value_bool(v, from->span, from->as.boolean);
-            break;
-
         case VAL_ERROR:
-            v->kind = VAL_ERROR;
             str_init_with(&v->as.error, &from->as.error);
             break;
 
+        case VAL_CREAL:
+            v->as.creal = cr_copy(from->as.creal);
+            break;
+
         case VAL_LAMBDA:
-            v->kind = VAL_LAMBDA;
             Expr *l = from->as.lambda.expr;
             v->as.lambda.expr = expr_lambda(l->as.lambda.param, l->as.lambda.body);
             v->as.lambda.env = from->as.lambda.env;
             v->as.lambda.env->refcount++;
             break;
+
+        case VAL_BUILTIN:
+            v->as.builtin = from->as.builtin;
+            break;
+
+        default:
+            UNREACHABLE();
     }
 }
 
@@ -183,7 +233,7 @@ void vm_reset(VM *v)
     scope_free_r(v->scope);
     v->scope = scope_from(NULL);
     free(v->last);
-    v->last = NULL;
+    v->last->kind = VAL_VOID;
     v->base = BASE_DEFAULT;
 }
 
@@ -247,59 +297,43 @@ static bool eval_number(Expr *e, Value *out)
     return true;
 }
 
-// A function to evaluate a builtin identifier.
-typedef bool (*BuiltinIdFn)(VM *, Expr *, Value *);
-
-static bool eval_builtin_true(VM *v, Expr *e, Value *out)
+// Evaluate a builtin identifier.
+static bool eval_builtin(VM *v, Expr *e, Builtin b, Value *out)
 {
-    (void)v;
-    value_bool(out, e->span, true);
+    switch (b)
+    {
+        case BUILTIN_HOLE:
+            out->kind = VAL_VOID;
+            break;
+
+        case BUILTIN_TRUE:
+            value_bool(out, e->span, true);
+            break;
+
+        case BUILTIN_FALSE:
+            value_bool(out, e->span, false);
+            break;
+
+        case BUILTIN_ANS:
+            if (v->last)
+                value_set(out, v->last);
+            break;
+
+        case BUILTIN_SQRT:
+            value_builtin(out, b);
+            break;
+
+        case BUILTIN_NONE:
+            break;
+
+        default:
+            UNREACHABLE();
+    }
     return true;
 }
-
-static bool eval_builtin_false(VM *v, Expr *e, Value *out)
-{
-    (void)v;
-    value_bool(out, e->span, false);
-    return true;
-}
-
-static bool eval_builtin_ans(VM *v, Expr *e, Value *out)
-{
-    (void)e;
-    if (v->last)
-        value_set(out, v->last);
-    return true;
-}
-
-static bool eval_builtin_hole(VM *v, Expr *e, Value *out)
-{
-    (void)v; (void)e;
-    out->kind = VAL_VOID;
-    return true;
-}
-
-// List of builtin identifiers.
-typedef enum
-{
-    BUILTIN_NONE,
-    BUILTIN_HOLE,
-    BUILTIN_TRUE,
-    BUILTIN_FALSE,
-    BUILTIN_ANS,
-} BuiltinId;
-
-// Lookup for evaluation functions for builtin identifiers.
-static const BuiltinIdFn builtin_id_eval[] = {
-    [BUILTIN_NONE]  = NULL,
-    [BUILTIN_HOLE]  = eval_builtin_hole,
-    [BUILTIN_TRUE]  = eval_builtin_true,
-    [BUILTIN_FALSE] = eval_builtin_false,
-    [BUILTIN_ANS]   = eval_builtin_ans,
-};
 
 // Convert an identifier to a builtin.
-static BuiltinId id_to_builtin(Expr *e)
+static Builtin id_to_builtin(Expr *e)
 {
     if (e->kind != EXPR_IDENT)
         return BUILTIN_NONE;
@@ -309,6 +343,7 @@ static BuiltinId id_to_builtin(Expr *e)
     if (sv_equal(name, "true"))  return BUILTIN_TRUE;
     if (sv_equal(name, "false")) return BUILTIN_FALSE;
     if (sv_equal(name, "ans"))   return BUILTIN_ANS;
+    if (sv_equal(name, "sqrt"))  return BUILTIN_SQRT;
 
     return BUILTIN_NONE;
 }
@@ -316,9 +351,9 @@ static BuiltinId id_to_builtin(Expr *e)
 // Evaluate an identifier
 static bool eval_ident(VM *v, Expr *e, Value *out)
 {
-    BuiltinId builtin = id_to_builtin(e);
+    Builtin builtin = id_to_builtin(e);
     if (builtin != BUILTIN_NONE)
-        return builtin_id_eval[builtin](v, e, out);
+        return eval_builtin(v, e, builtin, out);
 
     if (!symbol_get(v->scope, SV(e->as.id), out))
         return errorf(out, e->span, "undefined symbol");
@@ -415,10 +450,13 @@ static bool eval_bool_infix(Value *l, Expr *e, Value *r)
     Span s = e->span;
     l->span = s;
 
+    bool lb = as_bool_value(l);
+    bool rb = as_bool_value(r);
+
     switch (e->as.infix.op)
     {
-        case OP_EQ:  value_bool(l, s, l->as.boolean == r->as.boolean); break;
-        case OP_NEQ: value_bool(l, s, l->as.boolean != r->as.boolean); break;
+        case OP_EQ:  value_bool(l, s, lb == rb); break;
+        case OP_NEQ: value_bool(l, s, lb != rb); break;
         default:     return errorf(l, s, "Unknown operator");
     }
     return true;
@@ -432,7 +470,7 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
     if (l->kind != EXPR_IDENT)
         return errorf(out, l->span, "Expected identifier");
 
-    BuiltinId builtin = id_to_builtin(l);
+    Builtin builtin = id_to_builtin(l);
     if (builtin != BUILTIN_NONE && builtin != BUILTIN_HOLE)
         return errorf(out, l->span, "Cannot assign to builtin identifier");
 
@@ -449,17 +487,77 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
     return true;
 }
 
-// Convert a bool value to a church-boolean function.
-static Expr *bool_as_lambda(Value *b)
+static bool eval_lambda_apply(VM *v, Expr *f, Value *out)
 {
-    StringView p1 = b->as.boolean ? SV("x") : SV("_");
-    StringView p2 = b->as.boolean ? SV("_") : SV("y");
-    StringView rt = b->as.boolean ? p1 : p2;
+    if (f->as.lambda.param->kind == EXPR_IDENT)
+        symbol_set(v->scope, SV(f->as.lambda.param->as.id), out);
+
+    return vm_eval_expr(v, f->as.lambda.body, out);
+}
+
+// Convert a bool value to a church-boolean function.
+static Expr *bool_as_lambda(bool v, Span span)
+{
+    StringView p1 = v ? SV("x") : SV("_");
+    StringView p2 = v ? SV("_") : SV("y");
+    StringView rt = v ? p1 : p2;
 
     return expr_lambda(
-            expr_id(b->span, p1),
-            expr_lambda(expr_id(b->span, p2), expr_id(b->span, rt))
+            expr_id(span, p1),
+            expr_lambda(expr_id(span, p2), expr_id(span, rt))
         );
+}
+
+// Evaluate square root.
+static bool eval_sqrt(Value *out)
+{
+    CRNode *n = NULL;
+
+    switch (out->kind)
+    {
+        case VAL_CREAL:
+            n = cr_sqrt(out->as.creal);
+            break;
+
+        case VAL_NUMBER:
+            CRNode *q = cr_from_mpq(out->as.number);
+            n = cr_sqrt(q);
+            break;
+
+        default:
+            return errorf(out, out->span, "Invalid argument");
+    }
+    value_creal(out, out->span, n);
+    return true;
+}
+
+// Evaluate builtin application.
+static bool eval_builtin_apply(VM *v, Value *f, Value *out)
+{
+    bool ok = true;
+
+    switch (f->as.builtin)
+    {
+        case BUILTIN_TRUE:
+        case BUILTIN_FALSE:
+            Expr *fn = bool_as_lambda(f->as.builtin == BUILTIN_TRUE, f->span);
+            eval_lambda_apply(v, fn, out);
+            expr_destroy(&fn);
+            break;
+
+        case BUILTIN_SQRT:
+            ok = eval_sqrt(out);
+            break;
+
+        case BUILTIN_HOLE:
+        case BUILTIN_ANS:
+            break;
+
+        default:
+            UNREACHABLE();
+    }
+
+    return ok;
 }
 
 // Evaluate an application expression.
@@ -471,42 +569,37 @@ static bool eval_apply(VM *v, Expr *f, Expr *a, Value *out)
     if (!vm_eval_expr(v, f, &func))
     {
         value_set(out, &func);
-        ok = false;
-        goto cleanup;
+        vm_value_free(&func);
+        return false;
     }
 
-    if (func.kind != VAL_LAMBDA && func.kind != VAL_BOOL)
-    {
-        ok = errorf(out, f->span, "Expected lambda");
-        goto cleanup;
-    }
     if (!vm_eval_expr(v, a, out))
     {
-        ok = false;
-        goto cleanup;
+        vm_value_free(&func);
+        return false;
     }
 
-    Expr *lam = func.kind == VAL_LAMBDA
-        ? func.as.lambda.expr
-        : bool_as_lambda(&func);
-
     Scope *s = scope_from(func.as.lambda.env);
-
     Scope *prev = v->scope;
     v->scope = s;
 
-    if (lam->as.lambda.param->kind == EXPR_IDENT)
-        symbol_set(s, SV(lam->as.lambda.param->as.id), out);
+    switch (func.kind)
+    {
+        case VAL_LAMBDA:
+            ok = eval_lambda_apply(v, func.as.lambda.expr, out);
+            break;
 
-    ok = vm_eval_expr(v, lam->as.lambda.body, out);
+        case VAL_BUILTIN:
+            ok = eval_builtin_apply(v, &func, out);
+            break;
+
+        default:
+            ok = errorf(out, f->span, "Expected lambda");
+            break;
+    }
 
     scope_free(s);
     v->scope = prev;
-
-    if (func.kind == VAL_BOOL)
-        expr_destroy(&lam);
-
-cleanup:
     vm_value_free(&func);
     return ok;
 }
@@ -538,7 +631,7 @@ static bool eval_infix(VM *v, Expr *e, Value *out)
     {
         ok = eval_number_infix(out, e, &r);
     }
-    else if (same_kind && out->kind == VAL_BOOL)
+    else if (same_kind && is_bool_value(out))
     {
         ok = eval_bool_infix(out, e, &r);
     }
@@ -610,10 +703,10 @@ static bool eval_cond(VM *v, Expr *e, Value *out)
 {
     if (!vm_eval_expr(v, e->as.cond.if_, out))
         return false;
-    if (out->kind != VAL_BOOL)
+    if (!is_bool_value(out))
         return errorf(out, e->as.cond.if_->span, "Expected bool");
 
-    return out->as.boolean 
+    return as_bool_value(out)
         ? vm_eval_expr(v, e->as.cond.then, out)
         : vm_eval_expr(v, e->as.cond.else_, out);
 }
@@ -721,11 +814,13 @@ static void value_render_error(Value *v, String *sb, RenderCtx *ctx)
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 
-// Render a bool value.
-static void value_render_bool(Value *v, String *sb, RenderCtx *ctx)
+// Render a builtin value.
+static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
 {
     if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-    str_appendf(sb, "'%s", v->as.boolean ? "true" : "false");
+
+    str_appendf(sb, "'%s", builtin_to_str[v->as.builtin]);
+
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 
@@ -807,18 +902,32 @@ static void value_render_lambda(Value *v, String *sb, RenderCtx *ctx)
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }
 
+static void value_render_creal(Value *v, String *sb, RenderCtx *ctx)
+{
+    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+
+    mpfi_t result;
+    mpfi_init2(result, ctx->prec);
+    cr_compute(v->as.creal, ctx->prec, result);
+
+    render_creal(sb, result, ctx->base, ctx->max_digits);
+
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+}
+
 // Render a value to the string builder.
 // The render may contain newlines but will not have a final newline.
 void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
 {
     switch (v->kind)
     {
-        case VAL_ERROR:  return value_render_error(v, sb, ctx);
-        case VAL_NUMBER: return value_render_number(v, sb, ctx);
-        case VAL_BOOL:   return value_render_bool(v, sb, ctx);
-        case VAL_LAMBDA: return value_render_lambda(v, sb, ctx);
-        case VAL_VOID:   break;
-        default:         UNREACHABLE();
+        case VAL_ERROR:   return value_render_error(v, sb, ctx);
+        case VAL_NUMBER:  return value_render_number(v, sb, ctx);
+        case VAL_BUILTIN: return value_render_builtin(v, sb, ctx);
+        case VAL_LAMBDA:  return value_render_lambda(v, sb, ctx);
+        case VAL_CREAL:   return value_render_creal(v, sb, ctx);
+        case VAL_VOID:    break;
+        default:          UNREACHABLE();
     }
 }
 

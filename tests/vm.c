@@ -6,7 +6,8 @@
 #define START() \
     String sb; str_init(&sb); \
     RenderCtx ctx = { \
-        .max_digits=50, \
+        .prec = 50, \
+        .max_digits=10, \
         .base=10, \
         .num_form=NUMBER_RATIONAL, \
         .src=SV(""), \
@@ -48,8 +49,8 @@
 } while (0)
 
 #define BOOL_EQ(v, b) do { \
-    CUT_MUST((v)->kind == VAL_BOOL); \
-    CUT_CHECK((v)->as.boolean == (b)); \
+    CUT_MUST((v)->kind == VAL_BUILTIN); \
+    CUT_CHECK(((v)->as.builtin == BUILTIN_TRUE) == (b)); \
 } while (0)
 
 
@@ -266,5 +267,16 @@ TEST(infix_application)
         EVAL("'div = 'x: 'y: 'x / 'y", &val);
         EVAL("1 `div` 2", &val);
         NUM_EQ(&val, 1, 2);
+    END();
+}
+
+TEST(sqrt_eval)
+{
+    START();
+        EVAL_RENDER("'sqrt 2", &val);
+        CUT_CHECK(sv_equal(sb, "1.414213562..."));
+
+        EVAL_RENDER("'sqrt 7", &val);
+        CUT_CHECK(sv_equal(sb, "2.645751311..."));
     END();
 }

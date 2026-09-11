@@ -51,6 +51,8 @@ const char *builtin_to_str[] = {
     [BUILTIN_FALSE] = "false",
     [BUILTIN_HOLE]  = "_",
     [BUILTIN_ANS]   = "ans",
+    [BUILTIN_PI]    = "pi",
+    [BUILTIN_E]     = "e",
     [BUILTIN_SQRT]  = "sqrt",
 };
 
@@ -321,6 +323,14 @@ static bool eval_builtin(VM *v, Expr *e, Builtin b, Value *out)
                 value_set(out, v->last);
             break;
 
+        case BUILTIN_PI:
+            value_real(out, e->span, cr_pi());
+            break;
+
+        case BUILTIN_E:
+            value_real(out, e->span, cr_e());
+            break;
+
         case BUILTIN_SQRT:
             value_builtin(out, b);
             break;
@@ -345,6 +355,8 @@ static Builtin id_to_builtin(Expr *e)
     if (sv_equal(name, "true"))  return BUILTIN_TRUE;
     if (sv_equal(name, "false")) return BUILTIN_FALSE;
     if (sv_equal(name, "ans"))   return BUILTIN_ANS;
+    if (sv_equal(name, "pi"))    return BUILTIN_PI;
+    if (sv_equal(name, "e"))     return BUILTIN_E;
     if (sv_equal(name, "sqrt"))  return BUILTIN_SQRT;
 
     return BUILTIN_NONE;
@@ -378,14 +390,28 @@ static bool eval_prefix(VM *v, Expr *e, Value *out)
                     return true;
 
                 default:
-                    // fallthrough
+                    break;
             }
-            // fallthrough
+            break;
+
+        case VAL_REAL:
+            switch (e->as.prefix.op)
+            {
+                case OP_NEG:
+                    out->as.real = cr_neg(out->as.real);
+                    return true;
+
+                default:
+                    break;
+            }
+            break;
+
         default:
-            return errorf(out, e->span, "Invalid operation: '%s' %s", 
-                    op_to_str[e->as.prefix.op],
-                    vk_to_str[out->kind]);
+            break;
     }
+    return errorf(out, e->span, "Invalid operation: '%s' %s", 
+            op_to_str[e->as.prefix.op],
+            vk_to_str[out->kind]);
 }
 
 // Perform an mpq infix operation on two numbers wrapped in value.

@@ -25,6 +25,9 @@ typedef enum
     BUILTIN_HOLE,
     BUILTIN_ANS,
 
+    BUILTIN_PI,
+    BUILTIN_E,
+
     BUILTIN_TRUE,
     BUILTIN_FALSE,
 

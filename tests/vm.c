@@ -283,3 +283,11 @@ TEST(sqrt_eval)
         CUT_CHECK(sv_equal(sb, "3"));
     END();
 }
+
+TEST(exact_and_real_operation)
+{
+    START();
+        EVAL_RENDER("'sqrt 2 + 2", &val);
+        CUT_CHECK(sv_equal(sb, "3.414213562..."));
+    END();
+}

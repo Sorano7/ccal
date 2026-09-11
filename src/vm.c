@@ -1,231 +1,7 @@
 #include "vm.h"
 #include "number.h"
 #include "parser.h"
-
-#include <assert.h>
 #include <stdarg.h>
-
-// Free a scope and all of its symbols.
-static void scope_free(Scope *s)
-{
-    DA_FOR(s, i)
-    {
-        Symbol sym = da_at(s, i);
-        str_free(sym.id);
-        free(sym.id);
-        vm_value_free(&sym.value);
-    }
-    da_free(s);
-}
-
-// Recursively free a scope.
-static void scope_free_r(Scope *s)
-{
-    scope_free(s);
-    while ((s = s->parent))
-        scope_free(s);
-}
-
-// Create a new scope from a parent.
-static Scope *scope_from(Scope *parent)
-{
-    Scope *s = malloc(sizeof(Scope));
-    da_init(s);
-    s->parent = parent;
-    s->refcount = 0;
-    return s;
-}
-
-// Lookup of string names for value kind.
-static const char *vk_to_str[] = {
-    [VAL_VOID]    = "void",
-    [VAL_ERROR]   = "error",
-    [VAL_EXACT]   = "exact",
-    [VAL_REAL]    = "real",
-    [VAL_BUILTIN] = "builtin",
-    [VAL_LAMBDA]  = "lambda",
-};
-
-const char *builtin_to_str[] = {
-    [BUILTIN_TRUE]  = "true",
-    [BUILTIN_FALSE] = "false",
-    [BUILTIN_HOLE]  = "_",
-    [BUILTIN_ANS]   = "ans",
-    [BUILTIN_PI]    = "pi",
-    [BUILTIN_E]     = "e",
-    [BUILTIN_SQRT]  = "sqrt",
-    [BUILTIN_POW]   = "pow",
-    [BUILTIN_EXP]   = "exp",
-    [BUILTIN_LOG]   = "log",
-    [BUILTIN_LN]    = "ln",
-};
-
-// Free the value.
-void vm_value_free(Value *v)
-{
-    if (!v) return;
-    switch (v->kind)
-    {
-        case VAL_EXACT:
-            mpq_clear(v->as.exact);
-            break;
-
-        case VAL_REAL:
-            cr_release(v->as.real);
-            break;
-
-        case VAL_ERROR:
-            str_free(&v->as.error);
-            break;
-
-        case VAL_LAMBDA:
-            expr_destroy(&v->as.lambda.expr);
-            if (v->as.lambda.env->refcount == 0)
-            {
-                scope_free(v->as.lambda.env);
-                free(v->as.lambda.env);
-            }
-            else
-            {
-                v->as.lambda.env->refcount--;
-            }
-            break;
-
-        case VAL_BUILTIN:
-        case VAL_VOID:
-            break;
-
-        default:
-            UNREACHABLE();
-    }
-    memset(v, 0, sizeof(*v));
-}
-
-// Intializes a number value.
-static void value_exact(Value *v, Span span)
-{
-    assert(v);
-    v->kind = VAL_EXACT;
-    v->span = span;
-    mpq_init(v->as.exact);
-}
-
-// Initializes a CReal value.
-static void value_real(Value *v, Span span, CR *n)
-{
-    assert(v);
-    v->kind = VAL_REAL;
-    v->span = span;
-    v->as.real = n;
-}
-
-// Initializes a bool value.
-static void value_bool(Value *v, Span span, bool b)
-{
-    assert(v);
-    v->kind = VAL_BUILTIN;
-    v->span = span;
-    v->as.builtin = b ? BUILTIN_TRUE : BUILTIN_FALSE;
-}
-
-static inline bool is_bool_value(Value *v)
-{
-    if (v->kind != VAL_BUILTIN)
-        return false;
-    return v->as.builtin == BUILTIN_TRUE || v->as.builtin == BUILTIN_FALSE;
-}
-
-static inline bool as_bool_value(Value *v)
-{
-    assert(is_bool_value(v));
-    return v->as.builtin == BUILTIN_TRUE;
-}
-
-// Initializes a lambda value.
-static void value_lambda(Value *v, Expr *e, Scope *s)
-{
-    assert(v);
-    assert(e->kind == EXPR_LAMBDA);
-    v->kind = VAL_LAMBDA;
-    v->span = e->span;
-    v->as.lambda.expr = expr_clone(e);
-    v->as.lambda.env = s;
-}
-
-// Intializes a builtin value.
-static void value_builtin(Value *v, Builtin b)
-{
-    assert(v);
-    v->kind = VAL_BUILTIN;
-    v->as.builtin = b;
-}
-
-// Initializes an error value with message.
-static bool errorf(Value *v, Span span, const char *fmt, ...)
-{
-    v->kind = VAL_ERROR;
-    v->span = span;
-    str_init(&v->as.error);
-
-    va_list args;
-    va_start(args, fmt);
-    str_appendvf(&v->as.error, fmt, args);
-    va_end(args);
-    return false;
-}
-
-// Initializes a error value from an error expression.
-static bool value_error(Value *v, const Expr *e)
-{
-    assert(is_error(e));
-
-    v->kind = VAL_ERROR;
-    v->span = e->span;
-    str_init_with(&v->as.error, &e->as.err);
-
-    return false;
-}
-
-// Set a value from another value.
-static void value_set(Value *v, const Value *from)
-{
-    v->kind = from->kind;
-    v->span = from->span;
-    switch (from->kind)
-    {
-        case VAL_VOID:
-            v->kind = VAL_VOID;
-            break;
-
-        case VAL_EXACT:
-            value_exact(v, from->span);
-            mpq_set(v->as.exact, from->as.exact);
-            mpq_canonicalize(v->as.exact);
-            break;
-
-        case VAL_ERROR:
-            str_init_with(&v->as.error, &from->as.error);
-            break;
-
-        case VAL_REAL:
-            v->as.real = cr_retain(from->as.real);
-            break;
-
-        case VAL_LAMBDA:
-            Expr *l = from->as.lambda.expr;
-            v->as.lambda.expr = expr_lambda(l->as.lambda.param, l->as.lambda.body);
-            v->as.lambda.env = from->as.lambda.env;
-            v->as.lambda.env->refcount++;
-            break;
-
-        case VAL_BUILTIN:
-            v->as.builtin = from->as.builtin;
-            break;
-
-        default:
-            UNREACHABLE();
-    }
-}
 
 // Initialize a VM with default base;
 void vm_init(VM *v)
@@ -253,50 +29,6 @@ void vm_free(VM *v)
     v->last = NULL;
 }
 
-// Assign a symbol to the scope.
-static void symbol_set(Scope *scope, StringView id, const Value *value)
-{
-    DA_FOR(scope, i)
-    {
-        Symbol *existing = &da_at(scope, i);
-        if (sv_equal(existing->id, id))
-        {
-            vm_value_free(&existing->value);
-            if (value)
-                value_set(&existing->value, value);
-            return;
-        }
-    }
-    Symbol s = {0};
-    s.id = malloc(sizeof(String));
-    str_init_with(s.id, id);
-
-    if (value)
-        value_set(&s.value, value);
-    da_append(scope, s);
-}
-
-// Find a symbol from the scope.
-static bool symbol_get(Scope *scope, StringView id, Value *out)
-{
-    while (scope)
-    {
-        DA_FOR(scope, i)
-        {
-            Symbol existing = da_at(scope, i);
-            if (sv_equal(existing.id, id))
-            {
-                if (existing.value.kind == VAL_VOID)
-                    return false;
-                value_set(out, &existing.value);
-                return true;
-            }
-        }
-        scope = scope->parent;
-    }
-    return false;
-}
-
 // Evaluate a number expression.
 static bool eval_number(Expr *e, Value *out)
 {
@@ -306,20 +38,12 @@ static bool eval_number(Expr *e, Value *out)
 }
 
 // Evaluate a builtin identifier.
-static bool eval_builtin(VM *v, Expr *e, Builtin b, Value *out)
+static bool eval_builtin(VM *v, Expr *e, BuiltinKind b, Value *out)
 {
     switch (b)
     {
         case BUILTIN_HOLE:
             out->kind = VAL_VOID;
-            break;
-
-        case BUILTIN_TRUE:
-            value_bool(out, e->span, true);
-            break;
-
-        case BUILTIN_FALSE:
-            value_bool(out, e->span, false);
             break;
 
         case BUILTIN_ANS:
@@ -336,11 +60,16 @@ static bool eval_builtin(VM *v, Expr *e, Builtin b, Value *out)
             break;
 
         case BUILTIN_SQRT:
-        case BUILTIN_POW:
         case BUILTIN_EXP:
-        case BUILTIN_LOG:
         case BUILTIN_LN:
-            value_builtin(out, b);
+            value_builtin(out, e->span, b, 1);
+            break;
+
+        case BUILTIN_TRUE:
+        case BUILTIN_FALSE:
+        case BUILTIN_POW:
+        case BUILTIN_LOG:
+            value_builtin(out, e->span, b, 2);
             break;
 
         case BUILTIN_NONE:
@@ -352,37 +81,15 @@ static bool eval_builtin(VM *v, Expr *e, Builtin b, Value *out)
     return true;
 }
 
-// Convert an identifier to a builtin.
-static Builtin id_to_builtin(Expr *e)
-{
-    if (e->kind != EXPR_IDENT)
-        return BUILTIN_NONE;
-
-    StringView name = SV(e->as.id);
-    if (sv_equal(name, "_"))     return BUILTIN_HOLE;
-    if (sv_equal(name, "true"))  return BUILTIN_TRUE;
-    if (sv_equal(name, "false")) return BUILTIN_FALSE;
-    if (sv_equal(name, "ans"))   return BUILTIN_ANS;
-    if (sv_equal(name, "pi"))    return BUILTIN_PI;
-    if (sv_equal(name, "e"))     return BUILTIN_E;
-    if (sv_equal(name, "sqrt"))  return BUILTIN_SQRT;
-    if (sv_equal(name, "pow"))   return BUILTIN_POW;
-    if (sv_equal(name, "exp"))   return BUILTIN_EXP;
-    if (sv_equal(name, "log"))   return BUILTIN_LOG;
-    if (sv_equal(name, "ln"))    return BUILTIN_LN;
-
-    return BUILTIN_NONE;
-}
-
 // Evaluate an identifier
 static bool eval_ident(VM *v, Expr *e, Value *out)
 {
-    Builtin builtin = id_to_builtin(e);
+    BuiltinKind builtin = builtin_kind(e);
     if (builtin != BUILTIN_NONE)
         return eval_builtin(v, e, builtin, out);
 
     if (!symbol_get(v->scope, SV(e->as.id), out))
-        return errorf(out, e->span, "undefined symbol");
+        return value_errorf(out, e->span, "undefined symbol");
     return true;
 }
 
@@ -421,7 +128,7 @@ static bool eval_prefix(VM *v, Expr *e, Value *out)
         default:
             break;
     }
-    return errorf(out, e->span, "Invalid operation: '%s' %s", 
+    return value_errorf(out, e->span, "Invalid operation: '%s' %s", 
             op_to_str[e->as.prefix.op],
             vk_to_str[out->kind]);
 }
@@ -438,7 +145,7 @@ static bool eval_number_power(Value *l, Value *r)
     if (mpz_cmp_ui(mpq_denref(r->as.exact), 1) == 0)
     {
         if (!mpz_fits_ulong_p(mpq_numref(r->as.exact)))
-            return errorf(l, r->span, "Exponent too large");
+            return value_errorf(l, r->span, "Exponent too large");
 
         unsigned long exp = mpz_get_ui(mpq_numref(r->as.exact));
         mpz_pow_ui(mpq_numref(l->as.exact), mpq_numref(l->as.exact), exp);
@@ -447,7 +154,7 @@ static bool eval_number_power(Value *l, Value *r)
     }
     else
     {
-        return errorf(l, r->span, "Non-integer exponent is not supported");
+        return value_errorf(l, r->span, "Non-integer exponent is not supported");
     }
     return true;
 }
@@ -466,7 +173,7 @@ static bool eval_exact_infix(Value *l, Expr *e, Value *r)
 
         case OP_DIV:
             if (mpq_cmp_ui(r->as.exact, 0, 1) == 0)
-                return errorf(l, r->span, "Division by zero");
+                return value_errorf(l, r->span, "Division by zero");
             MPQ_INFIX(mpq_div, l, r);
             break;
 
@@ -479,7 +186,7 @@ static bool eval_exact_infix(Value *l, Expr *e, Value *r)
         case OP_EQ:  value_bool(l, s, MPQ_CMP(l, r) == 0); break;
         case OP_NEQ: value_bool(l, s, MPQ_CMP(l, r) != 0); break;
 
-        default:     return errorf(l, s, "Unknown operator");
+        default:     return value_errorf(l, s, "Unknown operator");
     }
     return true;
 }
@@ -497,7 +204,7 @@ static bool eval_real_infix(Value *l, Expr *e, Value *r)
         case OP_MUL:  value_real(l, s, cr_mul(l->as.real, r->as.real)); break;
         case OP_DIV:  value_real(l, s, cr_div(l->as.real, r->as.real)); break;
 
-        default:     return errorf(l, s, "Unknown operator");
+        default:     return value_errorf(l, s, "Unknown operator");
     }
     return true;
 }
@@ -508,14 +215,14 @@ static bool eval_bool_infix(Value *l, Expr *e, Value *r)
     Span s = e->span;
     l->span = s;
 
-    bool lb = as_bool_value(l);
-    bool rb = as_bool_value(r);
+    bool lb = value_to_bool(l);
+    bool rb = value_to_bool(r);
 
     switch (e->as.infix.op)
     {
         case OP_EQ:  value_bool(l, s, lb == rb); break;
         case OP_NEQ: value_bool(l, s, lb != rb); break;
-        default:     return errorf(l, s, "Unknown operator");
+        default:     return value_errorf(l, s, "Unknown operator");
     }
     return true;
 }
@@ -526,11 +233,11 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
     Expr *l = e->as.infix.left;
 
     if (l->kind != EXPR_IDENT)
-        return errorf(out, l->span, "Expected identifier");
+        return value_errorf(out, l->span, "Expected identifier");
 
-    Builtin builtin = id_to_builtin(l);
+    BuiltinKind builtin = builtin_kind(l);
     if (builtin != BUILTIN_NONE && builtin != BUILTIN_HOLE)
-        return errorf(out, l->span, "Cannot assign to builtin identifier");
+        return value_errorf(out, l->span, "Cannot assign to builtin identifier");
 
     if (!vm_eval_expr(v, e->as.infix.right, out))
         return false;
@@ -545,25 +252,21 @@ static bool eval_assign_infix(VM *v, Expr *e, Value *out)
     return true;
 }
 
+// Evaluate a lambda application.
 static bool eval_lambda_apply(VM *v, Expr *f, Value *out)
 {
     if (f->as.lambda.param->kind == EXPR_IDENT)
         symbol_set(v->scope, SV(f->as.lambda.param->as.id), out);
-
     return vm_eval_expr(v, f->as.lambda.body, out);
 }
 
-// Convert a bool value to a church-boolean function.
-static Expr *bool_as_lambda(bool v, Span span)
+// Evaluate a builtin bool application.
+static bool eval_builtin_bool(Value *f, Value *out)
 {
-    StringView p1 = v ? SV("x") : SV("_");
-    StringView p2 = v ? SV("_") : SV("y");
-    StringView rt = v ? p1 : p2;
-
-    return expr_lambda(
-            expr_id(span, p1),
-            expr_lambda(expr_id(span, p2), expr_id(span, rt))
-        );
+    if (!value_is_bool(f)) return true;
+    // value_free(out);
+    value_set(out, &da_at(&f->as.builtin.args, 0));
+    return true;
 }
 
 // Evaluate a builtin unary function on real values.
@@ -574,9 +277,9 @@ static bool eval_builtin_real_unary(Value *out, CRUnary fn)
     {
         case VAL_REAL : x = out->as.real;               break;
         case VAL_EXACT: x = cr_from_mpq(out->as.exact); break;
-        default:        return errorf(out, out->span, "Invalid argument");
+        default:        return value_errorf(out, out->span, "Invalid argument");
     }
-    vm_value_free(out);
+    value_free(out);
     value_real(out, out->span, fn(x));
     cr_release(x);
     return true;
@@ -587,18 +290,23 @@ static bool eval_builtin_apply(VM *v, Value *f, Value *out)
 {
     bool ok = true;
 
-    switch (f->as.builtin)
+    if (f->as.builtin.args.len + 1 < f->as.builtin.arity)
+    {
+        da_grow(&f->as.builtin.args);
+        Value *ptr = &f->as.builtin.args.data[f->as.builtin.args.len++];
+        value_set(ptr, out);
+        // value_free(out);
+        value_set(out, f);
+        return true;
+    }
+
+    switch (f->as.builtin.kind)
     {
         case BUILTIN_TRUE:
-        case BUILTIN_FALSE:
-            Expr *fn = bool_as_lambda(f->as.builtin == BUILTIN_TRUE, f->span);
-            eval_lambda_apply(v, fn, out);
-            expr_destroy(&fn);
-            break;
-
-        case BUILTIN_SQRT: ok = eval_builtin_real_unary(out, cr_sqrt); break;
-        case BUILTIN_EXP:  ok = eval_builtin_real_unary(out, cr_exp);  break;
-        case BUILTIN_LN:   ok = eval_builtin_real_unary(out, cr_ln);   break;
+        case BUILTIN_FALSE: ok = eval_builtin_bool(f, out);             break;
+        case BUILTIN_SQRT:  ok = eval_builtin_real_unary(out, cr_sqrt); break;
+        case BUILTIN_EXP:   ok = eval_builtin_real_unary(out, cr_exp);  break;
+        case BUILTIN_LN:    ok = eval_builtin_real_unary(out, cr_ln);   break;
 
         case BUILTIN_HOLE:
         case BUILTIN_ANS:
@@ -620,13 +328,13 @@ static bool eval_apply(VM *v, Expr *f, Expr *a, Value *out)
     if (!vm_eval_expr(v, f, &func))
     {
         value_set(out, &func);
-        vm_value_free(&func);
+        value_free(&func);
         return false;
     }
 
     if (!vm_eval_expr(v, a, out))
     {
-        vm_value_free(&func);
+        value_free(&func);
         return false;
     }
 
@@ -636,22 +344,17 @@ static bool eval_apply(VM *v, Expr *f, Expr *a, Value *out)
 
     switch (func.kind)
     {
-        case VAL_LAMBDA:
-            ok = eval_lambda_apply(v, func.as.lambda.expr, out);
-            break;
-
-        case VAL_BUILTIN:
-            ok = eval_builtin_apply(v, &func, out);
-            break;
-
+        case VAL_LAMBDA:  ok = eval_lambda_apply(v, func.as.lambda.expr, out); break;
+        case VAL_BUILTIN: ok = eval_builtin_apply(v, &func, out);              break;
         default:
-            ok = errorf(out, f->span, "Expected lambda");
-            break;
+              ok = value_errorf(out, f->span, 
+                      "Invalid application to %s", vk_to_str[func.kind]);
+              break;
     }
 
     scope_free(s);
     v->scope = prev;
-    vm_value_free(&func);
+    value_free(&func);
     return ok;
 }
 
@@ -681,7 +384,7 @@ static bool eval_infix(VM *v, Expr *e, Value *out)
     bool both_real  = same_kind && out->kind == VAL_REAL;
     bool one_real   = (out->kind == VAL_REAL && r.kind == VAL_EXACT)
                         || (out->kind == VAL_EXACT && r.kind == VAL_REAL);
-    bool both_bool  = same_kind && is_bool_value(out);
+    bool both_bool  = same_kind && value_is_bool(out);
 
     if (both_exact)
     {
@@ -696,7 +399,7 @@ static bool eval_infix(VM *v, Expr *e, Value *out)
         Value *exact = out->kind == VAL_REAL ? &r : out;
         CR *n = cr_from_mpq(exact->as.exact);
         Span span = exact->span;
-        vm_value_free(exact);
+        value_free(exact);
         value_real(exact, span, n);
 
         ok = eval_real_infix(out, e, &r);
@@ -707,13 +410,13 @@ static bool eval_infix(VM *v, Expr *e, Value *out)
     }
     else
     {
-        ok = errorf(out, e->span,
+        ok = value_errorf(out, e->span,
                 "Invalid operation: %s '%s' %s",
                 vk_to_str[out->kind], op_to_str[e->as.infix.op], vk_to_str[r.kind]);
     }
 
 cleanup:
-    vm_value_free(&r);
+    value_free(&r);
     return ok;
 }
 
@@ -755,7 +458,7 @@ static void capture_free_vars(VM *v, Expr *e, Scope *s)
         default:
             UNREACHABLE();
     }
-    vm_value_free(&tmp);
+    value_free(&tmp);
 }
 
 // Evaluate a lambda expression.
@@ -773,10 +476,10 @@ static bool eval_cond(VM *v, Expr *e, Value *out)
 {
     if (!vm_eval_expr(v, e->as.cond.if_, out))
         return false;
-    if (!is_bool_value(out))
-        return errorf(out, e->as.cond.if_->span, "Expected bool");
+    if (!value_is_bool(out))
+        return value_errorf(out, e->as.cond.if_->span, "Expected bool");
 
-    return as_bool_value(out)
+    return value_to_bool(out)
         ? vm_eval_expr(v, e->as.cond.then, out)
         : vm_eval_expr(v, e->as.cond.else_, out);
 }
@@ -786,11 +489,11 @@ bool vm_eval_expr(VM *v, Expr *e, Value *out)
 {
     bool ok = true;
 
-    assert(v && e && out);
+    DEV_MUST(v && e && out);
     out->kind = VAL_VOID;
 
     if (is_error(e))
-        return value_error(out, e);
+        return value_error_from_expr(out, e);
 
     switch (e->kind)
     {
@@ -817,7 +520,7 @@ bool vm_run(VM *v, StringView src, Value *out)
     bool ok = parse_module(src, v->base, &m);
     if (!ok)
     {
-        value_error(out, da_last(&m));
+        value_error_from_expr(out, da_last(&m));
         module_free(&m);
     }
 
@@ -834,173 +537,6 @@ bool vm_run(VM *v, StringView src, Value *out)
     return ok;
 }
 
-// Render a number value.
-static void value_render_number(Value *v, String *sb, RenderCtx *ctx)
-{
-    if (ctx->base >= 62)
-    {
-        if (ctx->use_color) str_appendf(sb, ACOLOR_MAGENTA);
-        str_append(sb, "Output base too large");
-        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-        return;
-    }
-
-    if (ctx->base != BASE_DEFAULT)
-    {
-        if (ctx->use_color) str_appendf(sb, AFMT_DIM);
-        str_appendf(sb, "%lu#", ctx->base);
-        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-    }
-
-    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-    switch (ctx->num_form)
-    {
-        case NUMBER_DECIMAL:
-            render_decimal(sb, v->as.exact, ctx->base, ctx->max_digits);
-            break;
-
-        case NUMBER_RATIONAL:
-            char *s = mpq_get_str(NULL, ctx->base, v->as.exact);
-            str_append(sb, s);
-            free(s);
-            break;
-    }
-
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-}
-
-// Render an error value.
-static void value_render_error(Value *v, String *sb, RenderCtx *ctx)
-{
-    str_appendf(sb, SV_FMT"\n", SV_ARG(ctx->src));
-    for (size_t i = 0; i < v->span.from; i++)
-        str_append(sb, " ");
-
-    if (ctx->use_color) str_appendf(sb, AFMT_BOLD ACOLOR_MAGENTA);
-    for (size_t i = 0; i < v->span.to - v->span.from; i++)
-        str_appendf(sb, "^");
-
-    str_appendf(sb, " "SV_FMT, SV_ARG(SV(v->as.error)));
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-}
-
-// Render a builtin value.
-static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
-{
-    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-
-    str_appendf(sb, "'%s", builtin_to_str[v->as.builtin]);
-
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-}
-
-static bool svlist_contains(SVList *sl, StringView v)
-{
-    DA_FOR(sl, i)
-    {
-        if (sv_equal(da_at(sl, i), v))
-            return true;
-    }
-    return false;
-}
-
-// Render an expression with identifiers substituted.
-static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, RenderCtx *ctx)
-{
-    Value tmp = {0};
-
-    switch (e->kind)
-    {
-        case EXPR_LAMBDA:
-            str_appendf(sb, "(");
-            expr_render(e->as.lambda.param, sb);
-            if (e->as.lambda.param->kind == EXPR_IDENT)
-                da_append(params, SV(e->as.lambda.param->as.id));
-            str_appendf(sb, " : ");
-            render_with_subst(s, e->as.lambda.body, params, sb, ctx);
-            str_appendf(sb, ")");
-            break;
-
-        case EXPR_IDENT:
-            if (!svlist_contains(params, SV(e->as.id)) && symbol_get(s, SV(e->as.id), &tmp))
-            {
-                if (tmp.kind != VAL_LAMBDA || s != tmp.as.lambda.env)
-                {
-                    vm_value_render(&tmp, sb, ctx);
-                    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-                    break;
-                }
-            }
-            expr_render(e, sb);
-            break;
-
-        case EXPR_PREFIX:
-            str_appendf(sb, " %s", op_to_str[e->as.prefix.op]);
-            render_with_subst(s, e->as.prefix.expr, params, sb, ctx);
-            break;
-
-        case EXPR_INFIX:
-            render_with_subst(s, e->as.infix.left, params, sb, ctx);
-            if (e->as.infix.op == OP_APPLY)
-                str_appendf(sb, " ");
-            else
-                str_appendf(sb, " %s ", op_to_str[e->as.infix.op]);
-            render_with_subst(s, e->as.infix.right, params, sb, ctx);
-            break;
-
-        default:
-            expr_render(e, sb);
-            break;
-    }
-    vm_value_free(&tmp);
-}
-
-// Render a lambda value;
-static void value_render_lambda(Value *v, String *sb, RenderCtx *ctx)
-{
-    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-
-    SVList sl;
-    da_init(&sl);
-
-    Expr *e = v->as.lambda.expr;
-    if (e->as.lambda.param->kind == EXPR_IDENT)
-        da_append(&sl, SV(e->as.lambda.param->as.id));
-    render_with_subst(v->as.lambda.env, e, &sl, sb, ctx);
-
-    da_free(&sl);
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-}
-
-static void value_render_creal(Value *v, String *sb, RenderCtx *ctx)
-{
-    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-
-    mpfi_t result;
-    mpfi_init2(result, ctx->prec);
-    cr_eval(v->as.real, ctx->prec, result);
-
-    render_creal(sb, result, ctx->base, ctx->max_digits);
-
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-}
-
-// Render a value to the string builder.
-// The render may contain newlines but will not have a final newline.
-void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
-{
-    switch (v->kind)
-    {
-        case VAL_ERROR:   return value_render_error(v, sb, ctx);
-        case VAL_EXACT:  return value_render_number(v, sb, ctx);
-        case VAL_BUILTIN: return value_render_builtin(v, sb, ctx);
-        case VAL_LAMBDA:  return value_render_lambda(v, sb, ctx);
-        case VAL_REAL:   return value_render_creal(v, sb, ctx);
-        case VAL_VOID:    break;
-        default:          UNREACHABLE();
-    }
-}
-
 // Render the current environment of the VM.
 void vm_env_render(VM *v, String *sb, RenderCtx *ctx)
 {
@@ -1013,7 +549,7 @@ void vm_env_render(VM *v, String *sb, RenderCtx *ctx)
     {
         Symbol sym = da_at(v->scope, i);
         str_appendf(sb, "    "SV_FMT" = ", SV_ARG(SV(sym.id)));
-        vm_value_render(&sym.value, sb, ctx);
+        value_render(&sym.value, sb, ctx);
         str_append(sb, "\n");
     }
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);

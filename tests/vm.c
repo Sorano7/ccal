@@ -19,7 +19,7 @@
 
 #define END() \
     str_free(&sb); \
-    vm_value_free(&val);
+    value_free(&val);
 
 #define EVAL(src, v) do { \
     if (!vm_run(&vm, SV(src), (v))) \
@@ -31,7 +31,7 @@
     str_reset(&sb); \
     EVAL((s), (v)); \
     ctx.src = SV(s); \
-    vm_value_render(&val, &sb, &ctx); \
+    value_render(&val, &sb, &ctx); \
 } while (0)
 
 #define EVAL_FAIL(src) do { \
@@ -49,8 +49,8 @@
 } while (0)
 
 #define BOOL_EQ(v, b) do { \
-    CUT_MUST((v)->kind == VAL_BUILTIN); \
-    CUT_CHECK(((v)->as.builtin == BUILTIN_TRUE) == (b)); \
+    CUT_MUST(value_is_bool(v)); \
+    CUT_CHECK(value_to_bool(v) == (b)); \
 } while (0)
 
 
@@ -232,7 +232,8 @@ TEST(boolean_application)
         BOOL_EQ(&val, true);
 
         EVAL("'true 1", &val);
-        CUT_CHECK(val.kind == VAL_LAMBDA);
+        CUT_CHECK(val.kind == VAL_BUILTIN);
+        CUT_CHECK(val.as.builtin.args.len == 1);
 
         EVAL("'true 1 2", &val);
         NUM_EQ(&val, 1, 1);

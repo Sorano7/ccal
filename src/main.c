@@ -178,7 +178,7 @@ void repl_start(VM *vm, RenderCtx *ctx)
         vm_run(vm, src, &value);
 
         ctx->src = src;
-        vm_value_render(&value, &out, ctx);
+        value_render(&value, &out, ctx);
         printf(SV_FMT"\n", SV_ARG(SV(out)));
 
         str_reset(&out);
@@ -198,7 +198,7 @@ int run_eval(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
 
     bool ok = vm_run(vm, src, &value);
     ctx->src =src;
-    vm_value_render(&value, &s, ctx);
+    value_render(&value, &s, ctx);
     fprintf(fdout, SV_FMT"\n", SV_ARG(SV(s)));
 
     return ok ? 0 : 1;

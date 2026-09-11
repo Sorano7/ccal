@@ -8,6 +8,7 @@ void shared_config(CutUnit *u)
     cut_unit_sources(u, "src/number.c");
     cut_unit_sources(u, "src/lexer.c");
     cut_unit_sources(u, "src/parser.c");
+    cut_unit_sources(u, "src/value.c");
     cut_unit_sources(u, "src/vm.c");
 
     cut_unit_includes(u, "include");

@@ -54,6 +54,10 @@ const char *builtin_to_str[] = {
     [BUILTIN_PI]    = "pi",
     [BUILTIN_E]     = "e",
     [BUILTIN_SQRT]  = "sqrt",
+    [BUILTIN_POW]   = "pow",
+    [BUILTIN_EXP]   = "exp",
+    [BUILTIN_LOG]   = "log",
+    [BUILTIN_LN]    = "ln",
 };
 
 // Free the value.
@@ -67,7 +71,7 @@ void vm_value_free(Value *v)
             break;
 
         case VAL_REAL:
-            cr_free(v->as.real);
+            cr_release(v->as.real);
             break;
 
         case VAL_ERROR:
@@ -204,7 +208,7 @@ static void value_set(Value *v, const Value *from)
             break;
 
         case VAL_REAL:
-            v->as.real = cr_copy(from->as.real);
+            v->as.real = cr_retain(from->as.real);
             break;
 
         case VAL_LAMBDA:
@@ -332,6 +336,10 @@ static bool eval_builtin(VM *v, Expr *e, Builtin b, Value *out)
             break;
 
         case BUILTIN_SQRT:
+        case BUILTIN_POW:
+        case BUILTIN_EXP:
+        case BUILTIN_LOG:
+        case BUILTIN_LN:
             value_builtin(out, b);
             break;
 
@@ -358,6 +366,10 @@ static Builtin id_to_builtin(Expr *e)
     if (sv_equal(name, "pi"))    return BUILTIN_PI;
     if (sv_equal(name, "e"))     return BUILTIN_E;
     if (sv_equal(name, "sqrt"))  return BUILTIN_SQRT;
+    if (sv_equal(name, "pow"))   return BUILTIN_POW;
+    if (sv_equal(name, "exp"))   return BUILTIN_EXP;
+    if (sv_equal(name, "log"))   return BUILTIN_LOG;
+    if (sv_equal(name, "ln"))    return BUILTIN_LN;
 
     return BUILTIN_NONE;
 }
@@ -554,26 +566,19 @@ static Expr *bool_as_lambda(bool v, Span span)
         );
 }
 
-// Evaluate square root.
-static bool eval_sqrt(Value *out)
+// Evaluate a builtin unary function on real values.
+static bool eval_builtin_real_unary(Value *out, CRUnary fn)
 {
-    CR *n = NULL;
-
+    CR *x = NULL;
     switch (out->kind)
     {
-        case VAL_REAL:
-            n = cr_sqrt(out->as.real);
-            break;
-
-        case VAL_EXACT:
-            CR *q = cr_from_mpq(out->as.exact);
-            n = cr_sqrt(q);
-            break;
-
-        default:
-            return errorf(out, out->span, "Invalid argument");
+        case VAL_REAL : x = out->as.real;               break;
+        case VAL_EXACT: x = cr_from_mpq(out->as.exact); break;
+        default:        return errorf(out, out->span, "Invalid argument");
     }
-    value_real(out, out->span, n);
+    vm_value_free(out);
+    value_real(out, out->span, fn(x));
+    cr_release(x);
     return true;
 }
 
@@ -591,9 +596,9 @@ static bool eval_builtin_apply(VM *v, Value *f, Value *out)
             expr_destroy(&fn);
             break;
 
-        case BUILTIN_SQRT:
-            ok = eval_sqrt(out);
-            break;
+        case BUILTIN_SQRT: ok = eval_builtin_real_unary(out, cr_sqrt); break;
+        case BUILTIN_EXP:  ok = eval_builtin_real_unary(out, cr_exp);  break;
+        case BUILTIN_LN:   ok = eval_builtin_real_unary(out, cr_ln);   break;
 
         case BUILTIN_HOLE:
         case BUILTIN_ANS:
@@ -671,12 +676,12 @@ static bool eval_infix(VM *v, Expr *e, Value *out)
         goto cleanup;
     }
 
-    bool same_kind = out->kind == r.kind;
+    bool same_kind  = out->kind == r.kind;
     bool both_exact = same_kind && out->kind == VAL_EXACT;
-    bool both_real = same_kind && out->kind == VAL_REAL;
-    bool one_real = (out->kind == VAL_REAL && r.kind == VAL_EXACT)
-        || (out->kind == VAL_EXACT && r.kind == VAL_REAL);
-    bool both_bool = same_kind && is_bool_value(out);
+    bool both_real  = same_kind && out->kind == VAL_REAL;
+    bool one_real   = (out->kind == VAL_REAL && r.kind == VAL_EXACT)
+                        || (out->kind == VAL_EXACT && r.kind == VAL_REAL);
+    bool both_bool  = same_kind && is_bool_value(out);
 
     if (both_exact)
     {

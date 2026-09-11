@@ -15,11 +15,12 @@ typedef enum
     CR_OP_SUB,
     CR_OP_MUL,
     CR_OP_DIV,
-    CR_OP_NEG,
 
+    CR_OP_NEG,
     CR_OP_SQRT,
-    CR_OP_POW,
-    CR_OP_LOG,
+
+    CR_OP_EXP,
+    CR_OP_LN,
 } CRKind;
 
 typedef struct CRNode
@@ -63,7 +64,6 @@ static CR *cr_new_unary(CRKind kind, CR *a)
     return n;
 }
 
-// Create a CR node from a rational.
 CR *cr_from_mpq(const mpq_t q)
 {
     CR *n = cr_new(CR_LEAF_RATIONAL);
@@ -72,55 +72,49 @@ CR *cr_from_mpq(const mpq_t q)
     return n;
 }
 
-CR *cr_pi(void)
+CR *cr_pi(void)          { return cr_new(CR_LEAF_PI); }
+CR *cr_e(void)           { return cr_new(CR_LEAF_E); }
+
+CR *cr_add(CR *a, CR *b) { return cr_new_binary(CR_OP_ADD, a, b); }
+CR *cr_sub(CR *a, CR *b) { return cr_new_binary(CR_OP_SUB, a, b); }
+CR *cr_mul(CR *a, CR *b) { return cr_new_binary(CR_OP_MUL, a, b); }
+CR *cr_div(CR *a, CR *b) { return cr_new_binary(CR_OP_DIV, a, b); }
+
+CR *cr_neg(CR *a)        { return cr_new_unary(CR_OP_NEG, a); }
+CR *cr_sqrt(CR *a)       { return cr_new_unary(CR_OP_SQRT, a); }
+
+CR *cr_exp(CR *x)        { return cr_new_unary(CR_OP_EXP, x); }
+CR *cr_ln(CR *x)         { return cr_new_unary(CR_OP_LN, x); }
+
+CR *cr_pow(CR *b, CR *x)
 {
-    return cr_new(CR_LEAF_PI);
+    CR *ln_b = cr_ln(b);
+    CR *prod = cr_mul(x, ln_b);
+    CR *n = cr_exp(prod);
+    cr_release(ln_b);
+    cr_release(prod);
+    return n;
 }
 
-CR *cr_e(void)
+CR *cr_log(CR *b, CR *x)
 {
-    return cr_new(CR_LEAF_E);
-}
-
-CR *cr_add(CR *a, CR *b)
-{
-    return cr_new_binary(CR_OP_ADD, a, b);
-}
-
-CR *cr_sub(CR *a, CR *b)
-{
-    return cr_new_binary(CR_OP_SUB, a, b);
-}
-
-CR *cr_mul(CR *a, CR *b)
-{
-    return cr_new_binary(CR_OP_MUL, a, b);
-}
-
-CR *cr_div(CR *a, CR *b)
-{
-    return cr_new_binary(CR_OP_DIV, a, b);
-}
-
-CR *cr_neg(CR *a)
-{
-    return cr_new_unary(CR_OP_NEG, a);
-}
-
-CR *cr_sqrt(CR *a)
-{
-    return cr_new_unary(CR_OP_SQRT, a);
+    CR *ln_x = cr_ln(x);
+    CR *ln_b = cr_ln(b);
+    CR *n = cr_div(ln_x, ln_b);
+    cr_release(ln_x);
+    cr_release(ln_b);
+    return n;
 }
 
 // Shallow copies one node to another.
-CR *cr_copy(CR *from)
+CR *cr_retain(CR *from)
 {
     from->refcount++;
     return from;
 }
 
 // Free a CR node.
-void cr_free(CR *n)
+void cr_release(CR *n)
 {
     if (!n) return;
     if (--n->refcount > 0) return;
@@ -130,8 +124,8 @@ void cr_free(CR *n)
     if (n->has_cache)
         mpfi_clear(n->cached_interval);
 
-    cr_free(n->l);
-    cr_free(n->r);
+    cr_release(n->l);
+    cr_release(n->r);
     free(n);
 }
 
@@ -215,6 +209,8 @@ void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result)
 
             case CR_OP_NEG:        MPFI_UNARY(mpfi_neg);        break;
             case CR_OP_SQRT:       MPFI_UNARY(mpfi_sqrt);       break;
+            case CR_OP_EXP:        MPFI_UNARY(mpfi_exp);        break;
+            case CR_OP_LN:         MPFI_UNARY(mpfi_log);        break;
 
             default:               UNREACHABLE();
         }

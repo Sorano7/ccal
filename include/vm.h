@@ -32,6 +32,11 @@ typedef enum
     BUILTIN_FALSE,
 
     BUILTIN_SQRT,
+
+    BUILTIN_POW,
+    BUILTIN_EXP,
+    BUILTIN_LOG,
+    BUILTIN_LN,
 } Builtin;
 
 extern const char *builtin_to_str[];

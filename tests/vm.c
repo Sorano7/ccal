@@ -40,9 +40,9 @@
 } while (0)
 
 #define NUM_EQ(v, n, d) do { \
-    CUT_MUST((v)->kind == VAL_NUMBER); \
-    if (mpq_cmp_ui((v)->as.number, (n), (d)) != 0) { \
-        char *s = mpq_get_str(NULL, 10, (v)->as.number); \
+    CUT_MUST((v)->kind == VAL_EXACT); \
+    if (mpq_cmp_ui((v)->as.exact, (n), (d)) != 0) { \
+        char *s = mpq_get_str(NULL, 10, (v)->as.exact); \
         CUT_ERROR("expected %d/%d, found %s", n, d, s); \
         free(s); \
     } \
@@ -278,5 +278,8 @@ TEST(sqrt_eval)
 
         EVAL_RENDER("'sqrt 7", &val);
         CUT_CHECK(sv_equal(sb, "2.645751311..."));
+
+        EVAL_RENDER("'sqrt 9", &val);
+        CUT_CHECK(sv_equal(sb, "3"));
     END();
 }

@@ -262,7 +262,7 @@ void render_creal(String *sb, const mpfi_t n, int base, size_t max_digits)
         goto done;
     }
 
-    if (mpfr_inf_p(lo) || mpfr_inf_p(hi))
+    if ((mpfr_inf_p(lo) || mpfr_inf_p(hi)) || (slo < 0 && shi > 0))
     {
         str_append(sb, "?");
         goto done;
@@ -284,61 +284,91 @@ void render_creal(String *sb, const mpfi_t n, int base, size_t max_digits)
         mpfr_set(b, hi, MPFR_RNDN);
     }
 
-    size_t req = max_digits + 2;
-    mpfr_exp_t exp_a, exp_b;
-    char *a_str = mpfr_get_str(NULL, &exp_a, base, req, a, MPFR_RNDD);
-    char *b_str = mpfr_get_str(NULL, &exp_b, base, req, b, MPFR_RNDU);
+    bool point = mpfr_equal_p(a, b);
+    char *a_str = NULL, *b_str = NULL;
+    mpfr_exp_t exp_a = 0, exp_b = 0;
 
-    if (!a_str || !b_str)
+    if (point)
+    {
+        a_str = mpfr_get_str(NULL, &exp_a, base, max_digits, a, MPFR_RNDN);
+        b_str = a_str;
+        exp_b = exp_a;
+    }
+    else
+    {
+        size_t req = max_digits + 2;
+        a_str = mpfr_get_str(NULL, &exp_a, base, req, a, MPFR_RNDD);
+        b_str = mpfr_get_str(NULL, &exp_b, base, req, b, MPFR_RNDU);
+    }
+
+    if ((!a_str || !b_str) || (exp_a != exp_b))
     {
         str_append(sb, "?");
-        if (a_str) mpfr_free_str(a_str);
-        if (b_str) mpfr_free_str(b_str);
+        goto cleanup;
+    }
+
+    if (a_str[0] == '0')
+    {
+        str_append(sb, "0");
         goto cleanup;
     }
 
     if (neg) str_append(sb, "-");
-
     StringView as = SV(a_str);
     StringView bs = SV(b_str);
 
+    size_t avail = as.len < bs.len ? as.len : bs.len;
+
     size_t agree = 0;
-    if (exp_a == exp_b)
+    while (agree < avail && as.data[agree] == bs.data[agree]) agree++;
+    size_t shown = agree < max_digits ? agree : max_digits;
+    bool truncated = (shown < agree) || (agree < avail);
+
+    if (shown == 0)
     {
-        size_t lim = as.len < bs.len ? as.len : bs.len;
-        size_t available = lim;
-        if (lim > max_digits) lim = max_digits;
-        while (agree < lim && as.data[0] == bs.data[0]) agree++;
+        str_append(sb, "?");
+        goto cleanup;
+    }
 
-        if (agree == 0)
+    size_t sig =shown;
+    while (sig > 1 && as.data[sig-1] == '0') sig--;
+
+    bool scientific = exp_a > 0 && (size_t)exp_a > sig;
+
+    if (scientific)
+    {
+        str_append(sb, as.data[0]);
+        if (sig > 1)
         {
-            str_append(sb, "?");
+            str_append(sb, ".");
+            str_append(sb, sv_slice(as, .from=1, .to=sig));
         }
-        else
-        {
-            str_append(sb, as.data[0]);
-            if (agree > 1)
-            {
-                str_append(sb, ".");
-                str_append(sb, sv_slice(as, .from=1, .to=agree));
-            }
-
-            if (exp_a - 1 != 0)
-                str_appendf(sb, "e%+ld", (long)(exp_a - 1));
-
-            if (agree < max_digits || agree < available)
-                str_append(sb, "...");
-        }
+        if (truncated) str_append(sb, "...");
+        if (exp_a - 1 != 0)
+            str_appendf(sb, "e%+ld", (long)(exp_a - 1));
+    }
+    else if (exp_a <= 0)
+    {
+        str_append(sb, "0.");
+        for (mpfr_exp_t z = 0; z < -exp_a; z++)
+            str_append(sb, "0");
+        str_append(sb, sv_slice(as, .from=0, .to=sig));
+        if (truncated) str_append(sb, "...");
     }
     else
     {
-        str_append(sb, "?");
+        str_append(sb, sv_slice(as, .from=0, .to=(size_t)exp_a));
+        if ((size_t)exp_a < sig)
+        {
+            str_append(sb, ".");
+            str_append(sb, sv_slice(as, .from=(size_t)exp_a, .to=sig));
+        }
+        if (truncated) str_append(sb, "...");
     }
 
-    mpfr_free_str(a_str);
-    mpfr_free_str(b_str);
-
 cleanup:
+    if (a_str) mpfr_free_str(a_str);
+    if (b_str && b_str != a_str) mpfr_free_str(b_str);
     mpfr_clears(a, b, NULL);
 
 done:

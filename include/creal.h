@@ -7,16 +7,25 @@
 
 #define PREC_DEFAULT 10
 
-typedef struct CRNode CRNode;
+typedef struct CRNode CR;
 
-CRNode *cr_from_mpq(const mpq_t q);
+CR *cr_from_mpq(const mpq_t q);
 
-CRNode *cr_sqrt(CRNode *a);
+CR *cr_pi(void);
+CR *cr_e(void);
 
-CRNode *cr_copy(CRNode *from);
+CR *cr_add(CR *a, CR *b);
+CR *cr_sub(CR *a, CR *b);
+CR *cr_mul(CR *a, CR *b);
+CR *cr_div(CR *a, CR *b);
 
-void cr_free(CRNode *n);
+CR *cr_neg(CR *a);
+CR *cr_sqrt(CR *a);
 
-void cr_compute(CRNode *n, mp_prec_t target_prec, mpfi_t result);
+CR *cr_copy(CR *from);
+
+void cr_free(CR *n);
+
+void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result);
 
 #endif

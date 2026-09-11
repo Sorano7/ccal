@@ -8,7 +8,18 @@
 typedef enum
 {
     CR_LEAF_RATIONAL,
+    CR_LEAF_PI,
+    CR_LEAF_E,
+
+    CR_OP_ADD,
+    CR_OP_SUB,
+    CR_OP_MUL,
+    CR_OP_DIV,
+    CR_OP_NEG,
+
     CR_OP_SQRT,
+    CR_OP_POW,
+    CR_OP_LOG,
 } CRKind;
 
 typedef struct CRNode
@@ -25,45 +36,91 @@ typedef struct CRNode
     size_t refcount;
 
     CRKind kind;
-} CRNode;
+} CR;
 
-// Allocate a new CReal node.
-static CRNode *cr_new(CRKind kind)
+// Allocate a new CR node.
+static CR *cr_new(CRKind kind)
 {
-    CRNode *n = calloc(1, sizeof(CRNode));
+    CR *n = calloc(1, sizeof(CR));
     n->kind = kind;
     n->refcount = 1;
     n->has_cache = false;
     return n;
 }
 
-// Create a CReal node from a rational.
-CRNode *cr_from_mpq(const mpq_t q)
+static CR *cr_new_binary(CRKind kind, CR *a, CR *b)
 {
-    CRNode *n = cr_new(CR_LEAF_RATIONAL);
+    CR *n = cr_new(kind);
+    n->l = a; a->refcount++;
+    n->r = b; b->refcount++;
+    return n;
+}
+
+static CR *cr_new_unary(CRKind kind, CR *a)
+{
+    CR *n = cr_new(kind);
+    n->l = a; a->refcount++;
+    return n;
+}
+
+// Create a CR node from a rational.
+CR *cr_from_mpq(const mpq_t q)
+{
+    CR *n = cr_new(CR_LEAF_RATIONAL);
     mpq_init(n->rational);
     mpq_set(n->rational, q);
     return n;
 }
 
-// Create a square root CReal node.
-CRNode *cr_sqrt(CRNode *a)
+CR *cr_pi(void)
 {
-    CRNode *n = cr_new(CR_OP_SQRT);
-    n->l = a;
-    a->refcount++;
-    return n;
+    return cr_new(CR_LEAF_PI);
+}
+
+CR *cr_e(void)
+{
+    return cr_new(CR_LEAF_E);
+}
+
+CR *cr_add(CR *a, CR *b)
+{
+    return cr_new_binary(CR_OP_ADD, a, b);
+}
+
+CR *cr_sub(CR *a, CR *b)
+{
+    return cr_new_binary(CR_OP_SUB, a, b);
+}
+
+CR *cr_mul(CR *a, CR *b)
+{
+    return cr_new_binary(CR_OP_MUL, a, b);
+}
+
+CR *cr_div(CR *a, CR *b)
+{
+    return cr_new_binary(CR_OP_DIV, a, b);
+}
+
+CR *cr_neg(CR *a)
+{
+    return cr_new_unary(CR_OP_NEG, a);
+}
+
+CR *cr_sqrt(CR *a)
+{
+    return cr_new_unary(CR_OP_SQRT, a);
 }
 
 // Shallow copies one node to another.
-CRNode *cr_copy(CRNode *from)
+CR *cr_copy(CR *from)
 {
     from->refcount++;
     return from;
 }
 
-// Free a CReal node.
-void cr_free(CRNode *n)
+// Free a CR node.
+void cr_free(CR *n)
 {
     if (!n) return;
     if (--n->refcount > 0) return;
@@ -78,29 +135,57 @@ void cr_free(CRNode *n)
     free(n);
 }
 
-// Compute a rational node.
-static void cr_rational_compute(CRNode *n, mp_prec_t p, mpfi_t out)
+static void cr_rational_eval(CR *n, mp_prec_t p, mpfi_t out)
 {
     mpfr_t lo, hi;
     mpfr_inits2(p, lo, hi, NULL);
+
     mpfr_set_q(lo, n->rational, MPFR_RNDD);
     mpfr_set_q(hi, n->rational, MPFR_RNDU);
+
     mpfi_interv_fr(out, lo, hi);
     mpfr_clears(lo, hi, NULL);
 }
 
-// Compute a squart root node.
-static void cr_sqrt_compute(CRNode *n, mp_prec_t p, mpfi_t out)
+static void cr_pi_eval(mp_prec_t p, mpfi_t out)
 {
-    mpfi_t ci;
-    mpfi_init2(ci, p);
-    cr_compute(n->l, p, ci);
-    mpfi_sqrt(out, ci);
-    mpfi_clear(ci);
+    mpfi_set_prec(out, p);
+    mpfi_const_pi(out);
 }
 
-// Compute a CReal to an interval enclosure.
-void cr_compute(CRNode *n, mp_prec_t target_prec, mpfi_t result)
+static void cr_e_eval(mp_prec_t p, mpfi_t out)
+{
+    mpfr_t lo, hi;
+    mpfr_inits2(p, lo, hi, NULL);
+
+    mpfr_set_ui(lo, 1, MPFR_RNDD);
+    mpfr_exp(lo, lo, MPFR_RNDD);
+    mpfr_set_ui(hi, 1, MPFR_RNDU);
+    mpfr_exp(hi, hi, MPFR_RNDU);
+
+    mpfi_interv_fr(out, lo, hi);
+    mpfr_clears(lo, hi, NULL);
+}
+
+#define MPFI_BINARY(fn) do { \
+    mpfi_t li, ri; \
+    mpfi_inits2(p, li, ri, NULL); \
+    cr_eval(n->l, p, li); \
+    cr_eval(n->r, p, ri); \
+    (fn)(out, li, ri); \
+    mpfi_clears(li, ri, NULL); \
+} while (0)
+
+#define MPFI_UNARY(fn) do { \
+    mpfi_t ci; \
+    mpfi_init2(ci, p); \
+    cr_eval(n->l, p, ci); \
+    (fn)(out, ci); \
+    mpfi_clear(ci); \
+} while (0)
+
+// Evaluate a CR to an interval enclosure.
+void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result)
 {
     if (n->has_cache && n->cached_prec >= target_prec)
     {
@@ -119,8 +204,18 @@ void cr_compute(CRNode *n, mp_prec_t target_prec, mpfi_t result)
     {
         switch (n->kind)
         {
-            case CR_LEAF_RATIONAL: cr_rational_compute(n, p, out); break;
-            case CR_OP_SQRT:       cr_sqrt_compute(n, p, out);     break;
+            case CR_LEAF_RATIONAL: cr_rational_eval(n, p, out); break;
+            case CR_LEAF_PI:       cr_pi_eval(p, out);          break;
+            case CR_LEAF_E:        cr_e_eval(p, out);           break;
+
+            case CR_OP_ADD:        MPFI_BINARY(mpfi_add);       break;
+            case CR_OP_SUB:        MPFI_BINARY(mpfi_sub);       break;
+            case CR_OP_MUL:        MPFI_BINARY(mpfi_mul);       break;
+            case CR_OP_DIV:        MPFI_BINARY(mpfi_div);       break;
+
+            case CR_OP_NEG:        MPFI_UNARY(mpfi_neg);        break;
+            case CR_OP_SQRT:       MPFI_UNARY(mpfi_sqrt);       break;
+
             default:               UNREACHABLE();
         }
 
@@ -145,7 +240,7 @@ void cr_compute(CRNode *n, mp_prec_t target_prec, mpfi_t result)
     mpfi_set(n->cached_interval, out);
 
     n->cached_prec = p;
-    n->has_cache = 1;
+    n->has_cache = true;
 
     mpfi_set(result, out);
     mpfi_clear(out);

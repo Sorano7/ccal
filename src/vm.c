@@ -40,7 +40,9 @@ static Scope *scope_from(Scope *parent)
 static const char *vk_to_str[] = {
     [VAL_VOID]    = "void",
     [VAL_ERROR]   = "error",
-    [VAL_NUMBER]  = "number",
+    [VAL_EXACT]   = "exact",
+    [VAL_REAL]    = "real",
+    [VAL_BUILTIN] = "builtin",
     [VAL_LAMBDA]  = "lambda",
 };
 
@@ -58,12 +60,12 @@ void vm_value_free(Value *v)
     if (!v) return;
     switch (v->kind)
     {
-        case VAL_NUMBER:
-            mpq_clear(v->as.number);
+        case VAL_EXACT:
+            mpq_clear(v->as.exact);
             break;
 
-        case VAL_CREAL:
-            cr_free(v->as.creal);
+        case VAL_REAL:
+            cr_free(v->as.real);
             break;
 
         case VAL_ERROR:
@@ -94,21 +96,21 @@ void vm_value_free(Value *v)
 }
 
 // Intializes a number value.
-static void value_number(Value *v, Span span)
+static void value_exact(Value *v, Span span)
 {
     assert(v);
-    v->kind = VAL_NUMBER;
+    v->kind = VAL_EXACT;
     v->span = span;
-    mpq_init(v->as.number);
+    mpq_init(v->as.exact);
 }
 
 // Initializes a CReal value.
-static void value_creal(Value *v, Span span, CRNode *n)
+static void value_real(Value *v, Span span, CR *n)
 {
     assert(v);
-    v->kind = VAL_CREAL;
+    v->kind = VAL_REAL;
     v->span = span;
-    v->as.creal = n;
+    v->as.real = n;
 }
 
 // Initializes a bool value.
@@ -189,18 +191,18 @@ static void value_set(Value *v, const Value *from)
             v->kind = VAL_VOID;
             break;
 
-        case VAL_NUMBER:
-            value_number(v, from->span);
-            mpq_set(v->as.number, from->as.number);
-            mpq_canonicalize(v->as.number);
+        case VAL_EXACT:
+            value_exact(v, from->span);
+            mpq_set(v->as.exact, from->as.exact);
+            mpq_canonicalize(v->as.exact);
             break;
 
         case VAL_ERROR:
             str_init_with(&v->as.error, &from->as.error);
             break;
 
-        case VAL_CREAL:
-            v->as.creal = cr_copy(from->as.creal);
+        case VAL_REAL:
+            v->as.real = cr_copy(from->as.real);
             break;
 
         case VAL_LAMBDA:
@@ -292,8 +294,8 @@ static bool symbol_get(Scope *scope, StringView id, Value *out)
 // Evaluate a number expression.
 static bool eval_number(Expr *e, Value *out)
 {
-    value_number(out, e->span);
-    mpq_set(out->as.number, e->as.number);
+    value_exact(out, e->span);
+    mpq_set(out->as.exact, e->as.number);
     return true;
 }
 
@@ -368,11 +370,11 @@ static bool eval_prefix(VM *v, Expr *e, Value *out)
 
     switch (out->kind)
     {
-        case VAL_NUMBER:
+        case VAL_EXACT:
             switch (e->as.prefix.op)
             {
                 case OP_NEG:
-                    mpq_neg(out->as.number, out->as.number);
+                    mpq_neg(out->as.exact, out->as.exact);
                     return true;
 
                 default:
@@ -387,23 +389,23 @@ static bool eval_prefix(VM *v, Expr *e, Value *out)
 }
 
 // Perform an mpq infix operation on two numbers wrapped in value.
-#define MPQ_INFIX(f, l, r) f((l)->as.number, (l)->as.number, (r)->as.number)
+#define MPQ_INFIX(f, l, r) f((l)->as.exact, (l)->as.exact, (r)->as.exact)
 
 // Compare two numbers wrapped in value.
-#define MPQ_CMP(l, r) mpq_cmp((l)->as.number, (r)->as.number)
+#define MPQ_CMP(l, r) mpq_cmp((l)->as.exact, (r)->as.exact)
 
 // Evaluate one number raised to the power of the other.
 static bool eval_number_power(Value *l, Value *r)
 {
-    if (mpz_cmp_ui(mpq_denref(r->as.number), 1) == 0)
+    if (mpz_cmp_ui(mpq_denref(r->as.exact), 1) == 0)
     {
-        if (!mpz_fits_ulong_p(mpq_numref(r->as.number)))
+        if (!mpz_fits_ulong_p(mpq_numref(r->as.exact)))
             return errorf(l, r->span, "Exponent too large");
 
-        unsigned long exp = mpz_get_ui(mpq_numref(r->as.number));
-        mpz_pow_ui(mpq_numref(l->as.number), mpq_numref(l->as.number), exp);
-        mpz_pow_ui(mpq_denref(l->as.number), mpq_denref(l->as.number), exp);
-        mpq_canonicalize(l->as.number);
+        unsigned long exp = mpz_get_ui(mpq_numref(r->as.exact));
+        mpz_pow_ui(mpq_numref(l->as.exact), mpq_numref(l->as.exact), exp);
+        mpz_pow_ui(mpq_denref(l->as.exact), mpq_denref(l->as.exact), exp);
+        mpq_canonicalize(l->as.exact);
     }
     else
     {
@@ -412,8 +414,8 @@ static bool eval_number_power(Value *l, Value *r)
     return true;
 }
 
-// Evaluate an infix operation between two numbers.
-static bool eval_number_infix(Value *l, Expr *e, Value *r)
+// Evaluate an infix operation between two exact numbers.
+static bool eval_exact_infix(Value *l, Expr *e, Value *r)
 {
     Span s = e->span;
     l->span = s;
@@ -425,7 +427,7 @@ static bool eval_number_infix(Value *l, Expr *e, Value *r)
         case OP_MUL: MPQ_INFIX(mpq_mul, l, r); break;
 
         case OP_DIV:
-            if (mpq_cmp_ui(r->as.number, 0, 1) == 0)
+            if (mpq_cmp_ui(r->as.exact, 0, 1) == 0)
                 return errorf(l, r->span, "Division by zero");
             MPQ_INFIX(mpq_div, l, r);
             break;
@@ -438,6 +440,24 @@ static bool eval_number_infix(Value *l, Expr *e, Value *r)
         case OP_GEQ: value_bool(l, s, MPQ_CMP(l, r) >= 0); break;
         case OP_EQ:  value_bool(l, s, MPQ_CMP(l, r) == 0); break;
         case OP_NEQ: value_bool(l, s, MPQ_CMP(l, r) != 0); break;
+
+        default:     return errorf(l, s, "Unknown operator");
+    }
+    return true;
+}
+
+// Evaluate infix between two real numbers.
+static bool eval_real_infix(Value *l, Expr *e, Value *r)
+{
+    Span s = e->span;
+    l->span = s;
+
+    switch (e->as.infix.op)
+    {
+        case OP_ADD:  value_real(l, s, cr_add(l->as.real, r->as.real)); break;
+        case OP_SUB:  value_real(l, s, cr_sub(l->as.real, r->as.real)); break;
+        case OP_MUL:  value_real(l, s, cr_mul(l->as.real, r->as.real)); break;
+        case OP_DIV:  value_real(l, s, cr_div(l->as.real, r->as.real)); break;
 
         default:     return errorf(l, s, "Unknown operator");
     }
@@ -511,23 +531,23 @@ static Expr *bool_as_lambda(bool v, Span span)
 // Evaluate square root.
 static bool eval_sqrt(Value *out)
 {
-    CRNode *n = NULL;
+    CR *n = NULL;
 
     switch (out->kind)
     {
-        case VAL_CREAL:
-            n = cr_sqrt(out->as.creal);
+        case VAL_REAL:
+            n = cr_sqrt(out->as.real);
             break;
 
-        case VAL_NUMBER:
-            CRNode *q = cr_from_mpq(out->as.number);
+        case VAL_EXACT:
+            CR *q = cr_from_mpq(out->as.exact);
             n = cr_sqrt(q);
             break;
 
         default:
             return errorf(out, out->span, "Invalid argument");
     }
-    value_creal(out, out->span, n);
+    value_real(out, out->span, n);
     return true;
 }
 
@@ -626,12 +646,31 @@ static bool eval_infix(VM *v, Expr *e, Value *out)
     }
 
     bool same_kind = out->kind == r.kind;
+    bool both_exact = same_kind && out->kind == VAL_EXACT;
+    bool both_real = same_kind && out->kind == VAL_REAL;
+    bool one_real = (out->kind == VAL_REAL && r.kind == VAL_EXACT)
+        || (out->kind == VAL_EXACT && r.kind == VAL_REAL);
+    bool both_bool = same_kind && is_bool_value(out);
 
-    if (same_kind && out->kind == VAL_NUMBER)
+    if (both_exact)
     {
-        ok = eval_number_infix(out, e, &r);
+        ok = eval_exact_infix(out, e, &r);
     }
-    else if (same_kind && is_bool_value(out))
+    else if (both_real)
+    {
+        ok = eval_real_infix(out, e, &r);
+    }
+    else if (one_real)
+    {
+        Value *exact = out->kind == VAL_REAL ? &r : out;
+        CR *n = cr_from_mpq(exact->as.exact);
+        Span span = exact->span;
+        vm_value_free(exact);
+        value_real(exact, span, n);
+
+        ok = eval_real_infix(out, e, &r);
+    }
+    else if (both_bool)
     {
         ok = eval_bool_infix(out, e, &r);
     }
@@ -786,11 +825,11 @@ static void value_render_number(Value *v, String *sb, RenderCtx *ctx)
     switch (ctx->num_form)
     {
         case NUMBER_DECIMAL:
-            render_decimal(sb, v->as.number, ctx->base, ctx->max_digits);
+            render_decimal(sb, v->as.exact, ctx->base, ctx->max_digits);
             break;
 
         case NUMBER_RATIONAL:
-            char *s = mpq_get_str(NULL, ctx->base, v->as.number);
+            char *s = mpq_get_str(NULL, ctx->base, v->as.exact);
             str_append(sb, s);
             free(s);
             break;
@@ -908,7 +947,7 @@ static void value_render_creal(Value *v, String *sb, RenderCtx *ctx)
 
     mpfi_t result;
     mpfi_init2(result, ctx->prec);
-    cr_compute(v->as.creal, ctx->prec, result);
+    cr_eval(v->as.real, ctx->prec, result);
 
     render_creal(sb, result, ctx->base, ctx->max_digits);
 
@@ -922,10 +961,10 @@ void vm_value_render(Value *v, String *sb, RenderCtx *ctx)
     switch (v->kind)
     {
         case VAL_ERROR:   return value_render_error(v, sb, ctx);
-        case VAL_NUMBER:  return value_render_number(v, sb, ctx);
+        case VAL_EXACT:  return value_render_number(v, sb, ctx);
         case VAL_BUILTIN: return value_render_builtin(v, sb, ctx);
         case VAL_LAMBDA:  return value_render_lambda(v, sb, ctx);
-        case VAL_CREAL:   return value_render_creal(v, sb, ctx);
+        case VAL_REAL:   return value_render_creal(v, sb, ctx);
         case VAL_VOID:    break;
         default:          UNREACHABLE();
     }

@@ -12,8 +12,8 @@ typedef enum
 {
     VAL_VOID,
     VAL_ERROR,
-    VAL_NUMBER,
-    VAL_CREAL,
+    VAL_EXACT,
+    VAL_REAL,
     VAL_LAMBDA,
     VAL_BUILTIN,
 } ValueKind;
@@ -21,10 +21,13 @@ typedef enum
 typedef enum
 {
     BUILTIN_NONE,
+
     BUILTIN_HOLE,
+    BUILTIN_ANS,
+
     BUILTIN_TRUE,
     BUILTIN_FALSE,
-    BUILTIN_ANS,
+
     BUILTIN_SQRT,
 } Builtin;
 
@@ -39,9 +42,9 @@ typedef struct
 
         Builtin builtin;
 
-        mpq_t number;
+        mpq_t exact;
 
-        CRNode *creal;
+        CR *real;
 
         struct
         {

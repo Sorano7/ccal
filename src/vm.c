@@ -257,14 +257,6 @@ static Value *eval_assign_infix(VM *v, Expr *e)
     return out;
 }
 
-#define AS_REAL(val, cr) do { \
-    switch ((val)->kind) { \
-        case VAL_REAL:  (cr) = (val)->as.real;               break; \
-        case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
-        default:        return value_errorf((val)->span, "Invalid argument"); \
-    } \
-} while (0)
-
 // Evaluate a lambda application.
 static Value *eval_lambda_apply(VM *v, Value *f, Value *arg)
 {
@@ -288,6 +280,14 @@ static Value *eval_builtin_bool(Value *f, Value *arg)
     if (!value_to_bool(f)) return value_retain(arg);
     return value_retain(da_at(&f->as.builtin.args, 0));
 }
+
+#define AS_REAL(val, cr) do { \
+    switch ((val)->kind) { \
+        case VAL_REAL:  (cr) = (val)->as.real;    break; \
+        case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
+        default:        return value_errorf((val)->span, "Invalid argument"); \
+    } \
+} while (0)
 
 // Evaluate a builtin unary function on real values.
 static Value *eval_builtin_real_unary(CRUnary fn, Value *arg)

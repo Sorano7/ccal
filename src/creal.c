@@ -72,6 +72,18 @@ CR *cr_from_mpq(const mpq_t q)
     return n;
 }
 
+CR *cr_from_si(long n, long d)
+{
+    mpq_t q;
+    mpq_init(q);
+    mpq_set_si(q, n, d > 0 ? (unsigned long)d : (unsigned long)-d);
+    if (d < 0) mpq_neg(q, q);
+    mpq_canonicalize(q);
+    CR *c = cr_from_mpq(q);
+    mpq_clear(q);
+    return c;
+}
+
 CR *cr_pi(void)          { return cr_new(CR_LEAF_PI); }
 CR *cr_e(void)           { return cr_new(CR_LEAF_E); }
 
@@ -240,4 +252,14 @@ void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result)
 
     mpfi_set(result, out);
     mpfi_clear(out);
+}
+
+double cr_to_d(CR *n)
+{
+    mpfi_t out;
+    mpfi_init2(out, 50);
+    cr_eval(n, 50, out);
+    double d = mpfi_get_d(out);
+    mpfi_clear(out);
+    return d;
 }

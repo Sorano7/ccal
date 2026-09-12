@@ -13,6 +13,7 @@ typedef CR *(*CRUnary)(CR *);
 typedef CR *(*CRBinary)(CR *, CR *);
 
 CR *cr_from_mpq(const mpq_t q);
+CR *cr_from_si(long n, long d);
 
 CR *cr_pi(void);
 CR *cr_e(void);
@@ -34,5 +35,6 @@ CR *cr_retain(CR *from);
 void cr_release(CR *n);
 
 void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result);
+double cr_to_d(CR *n);
 
 #endif

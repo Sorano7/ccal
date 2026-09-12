@@ -7,7 +7,7 @@
 void vm_init(VM *v)
 {
     v->scope = scope_from(NULL);
-    v->last = malloc(sizeof(Value));
+    v->last = NULL;
     v->base = BASE_DEFAULT;
 }
 
@@ -16,8 +16,8 @@ void vm_reset(VM *v)
 {
     scope_free_r(v->scope);
     v->scope = scope_from(NULL);
-    free(v->last);
-    v->last->kind = VAL_VOID;
+    if (v->last) value_release(v->last);
+    v->last = NULL;
     v->base = BASE_DEFAULT;
 }
 
@@ -25,8 +25,7 @@ void vm_reset(VM *v)
 void vm_free(VM *v)
 {
     scope_free_r(v->scope);
-    free(v->last);
-    v->last = NULL;
+    if (v->last) value_release(v->last);
 }
 
 // Evaluate a number expression.
@@ -258,6 +257,14 @@ static Value *eval_assign_infix(VM *v, Expr *e)
     return out;
 }
 
+#define AS_REAL(val, cr) do { \
+    switch ((val)->kind) { \
+        case VAL_REAL:  (cr) = (val)->as.real;               break; \
+        case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
+        default:        return value_errorf((val)->span, "Invalid argument"); \
+    } \
+} while (0)
+
 // Evaluate a lambda application.
 static Value *eval_lambda_apply(VM *v, Value *f, Value *arg)
 {
@@ -278,7 +285,7 @@ static Value *eval_lambda_apply(VM *v, Value *f, Value *arg)
 // Evaluate a builtin bool application.
 static Value *eval_builtin_bool(Value *f, Value *arg)
 {
-    if (!value_to_bool(f)) return arg;
+    if (!value_to_bool(f)) return value_retain(arg);
     return value_retain(da_at(&f->as.builtin.args, 0));
 }
 
@@ -286,19 +293,25 @@ static Value *eval_builtin_bool(Value *f, Value *arg)
 static Value *eval_builtin_real_unary(CRUnary fn, Value *arg)
 {
     CR *x = NULL;
-    switch (arg->kind)
-    {
-        case VAL_REAL : x = arg->as.real;               break;
-        case VAL_EXACT: x = cr_from_mpq(arg->as.exact); break;
-        default:        return value_errorf(arg->span, "Invalid argument");
-    }
+    AS_REAL(arg, x);
     Value *out = value_real(arg->span, fn(x));
-    cr_release(x);
+    return out;
+}
+
+// Evaluate a builtin binary function on real values.
+static Value *eval_builtin_real_binary(Value *f, CRBinary fn, Value *right)
+{
+    Value *left = da_at(&f->as.builtin.args, 0);
+
+    CR *l = NULL, *r = NULL;
+    AS_REAL(left, l);
+    AS_REAL(right, r);
+    Value *out = value_real((Span){left->span.from, right->span.to}, fn(l, r));
     return out;
 }
 
 // Evaluate builtin application.
-static Value *eval_builtin_apply(VM *v, Value *f, Value *arg)
+static Value *eval_builtin_apply(Value *f, Value *arg)
 {
     if (f->as.builtin.args.len + 1 < f->as.builtin.arity)
     {
@@ -313,6 +326,8 @@ static Value *eval_builtin_apply(VM *v, Value *f, Value *arg)
         case BUILTIN_SQRT:  return eval_builtin_real_unary(cr_sqrt, arg);
         case BUILTIN_EXP:   return eval_builtin_real_unary(cr_exp, arg);
         case BUILTIN_LN:    return eval_builtin_real_unary(cr_ln, arg);
+        case BUILTIN_POW:   return eval_builtin_real_binary(f, cr_pow, arg);
+        case BUILTIN_LOG:   return eval_builtin_real_binary(f, cr_log, arg);
 
         case BUILTIN_HOLE:  return value_errorf(f->span, "Expected lambda");
         case BUILTIN_ANS:
@@ -338,7 +353,7 @@ static Value *eval_apply(VM *v, Expr *f, Expr *a)
     switch (func->kind)
     {
         case VAL_LAMBDA:  out = eval_lambda_apply(v, func, arg);  break;
-        case VAL_BUILTIN: out = eval_builtin_apply(v, func, arg); break;
+        case VAL_BUILTIN: out = eval_builtin_apply(func, arg);    break;
         default:          out = value_errorf(f->span, "Invalid application of %s", vk_to_str[func->kind]);
                           break;
     }
@@ -496,12 +511,6 @@ Value *vm_eval_expr(VM *v, Expr *e)
         case EXPR_COND:   out = eval_cond(v, e);   break;
         default:          UNREACHABLE();
     }
-
-    if (!value_is_err(out))
-    {
-        if (v->last) value_release(v->last);
-        v->last = value_retain(out);
-    }
     return out;
 }
 
@@ -525,6 +534,9 @@ Value *vm_run(VM *v, StringView src)
         out = vm_eval_expr(v, e);
         if (value_is_err(out))
             goto cleanup;
+
+        if (v->last) value_release(v->last);
+        v->last = value_retain(out);
 
         if (i < m.len-1)
             value_release(out);

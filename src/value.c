@@ -11,20 +11,6 @@ const char *vk_to_str[] = {
     [VAL_LAMBDA]  = "lambda",
 };
 
-const char *builtin_to_str[] = {
-    [BUILTIN_TRUE]  = "true",
-    [BUILTIN_FALSE] = "false",
-    [BUILTIN_HOLE]  = "_",
-    [BUILTIN_ANS]   = "ans",
-    [BUILTIN_PI]    = "pi",
-    [BUILTIN_E]     = "e",
-    [BUILTIN_SQRT]  = "sqrt",
-    [BUILTIN_POW]   = "pow",
-    [BUILTIN_EXP]   = "exp",
-    [BUILTIN_LOG]   = "log",
-    [BUILTIN_LN]    = "ln",
-};
-
 static Value *value_new(ValueKind kind, Span span)
 {
     Value *v = malloc(sizeof(Value));
@@ -199,6 +185,20 @@ bool value_to_bool(const Value *v)
     DEV_MUST(value_is_bool(v));
     return v->as.builtin.kind == BUILTIN_TRUE;
 }
+
+const char *builtin_to_str[] = {
+    [BUILTIN_HOLE]  = "_",
+    [BUILTIN_TRUE]  = "true",
+    [BUILTIN_FALSE] = "false",
+    [BUILTIN_ANS]   = "ans",
+    [BUILTIN_PI]    = "pi",
+    [BUILTIN_E]     = "e",
+    [BUILTIN_SQRT]  = "sqrt",
+    [BUILTIN_POW]   = "pow",
+    [BUILTIN_EXP]   = "exp",
+    [BUILTIN_LOG]   = "log",
+    [BUILTIN_LN]    = "ln",
+};
 
 // Get the builtin kind from an expression
 BuiltinKind builtin_kind(Expr *e)

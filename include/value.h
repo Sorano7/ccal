@@ -45,7 +45,7 @@ typedef struct Value Value;
 
 typedef struct
 {
-    Value *data;
+    Value **data;
     size_t len, cap;
 } ValueList;
 
@@ -78,13 +78,14 @@ typedef struct Value
 
     Span span;
     ValueKind kind;
+    size_t refcount;
 } Value;
 
 // A symbol to value binding.
 typedef struct
 {
     String *id;
-    Value value;
+    Value *value;
 } Symbol;
 
 // An environment scope.
@@ -97,16 +98,20 @@ typedef struct Scope
     struct Scope *parent;
 } Scope;
 
-void value_exact(Value *v, Span span);
-void value_real(Value *v, Span span, CR *n);
-void value_bool(Value *v, Span span, bool b);
-void value_builtin(Value *v, Span span, BuiltinKind kind, size_t arity);
-void value_lambda(Value *v, Expr *e, Scope *s);
-bool value_errorf(Value *v, Span span, const char *fmt, ...);
-bool value_error_from_expr(Value *v, const Expr *e);
+Value *value_void(Span span);
+Value *value_exact(Span span, const mpq_t n);
+Value *value_real(Span span, CR *n);
+Value *value_bool(Span span, bool b);
+Value *value_builtin(Span span, BuiltinKind kind, size_t arity);
+Value *value_lambda(Expr *e, Scope *s);
+Value *value_errorf(Span span, const char *fmt, ...);
+Value *value_error_from_expr(const Expr *e);
 
-void value_set(Value *v, const Value *from);
-void value_free(Value *v);
+Value *value_retain(Value *from);
+Value *value_clone(const Value *from);
+void value_release(Value *v);
+
+#define value_is_err(v) (!v || v->kind == VAL_ERROR)
 
 bool value_is_bool(const Value *v);
 bool value_to_bool(const Value *v);
@@ -117,8 +122,8 @@ void scope_free(Scope *s);
 void scope_free_r(Scope *s);
 Scope *scope_from(Scope *parent);
 
-void symbol_set(Scope *scope, StringView id, const Value *value);
-bool symbol_get(Scope *scope, StringView id, Value *out);
+void scope_set_symbol(Scope *scope, StringView id, Value *value);
+Value *scope_get_symbol(Scope *scope, StringView id);
 
 typedef enum
 {

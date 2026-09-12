@@ -30,74 +30,52 @@ void vm_free(VM *v)
 }
 
 // Evaluate a number expression.
-static bool eval_number(Expr *e, Value *out)
+static Value *eval_number(Expr *e)
 {
-    value_exact(out, e->span);
-    mpq_set(out->as.exact, e->as.number);
-    return true;
+    return value_exact(e->span, e->as.number);
 }
 
 // Evaluate a builtin identifier.
-static bool eval_builtin(VM *v, Expr *e, BuiltinKind b, Value *out)
+static Value *eval_builtin(VM *v, Expr *e, BuiltinKind b)
 {
     switch (b)
     {
-        case BUILTIN_HOLE:
-            out->kind = VAL_VOID;
-            break;
-
-        case BUILTIN_ANS:
-            if (v->last)
-                value_set(out, v->last);
-            break;
-
-        case BUILTIN_PI:
-            value_real(out, e->span, cr_pi());
-            break;
-
-        case BUILTIN_E:
-            value_real(out, e->span, cr_e());
-            break;
+        case BUILTIN_ANS:  if (v->last) return value_retain(v->last); break;
+        case BUILTIN_PI:   return value_real(e->span, cr_pi());       break;
+        case BUILTIN_E:    return value_real(e->span, cr_e());        break;
 
         case BUILTIN_SQRT:
         case BUILTIN_EXP:
-        case BUILTIN_LN:
-            value_builtin(out, e->span, b, 1);
-            break;
+        case BUILTIN_LN:   return value_builtin(e->span, b, 1); break;
 
         case BUILTIN_TRUE:
         case BUILTIN_FALSE:
         case BUILTIN_POW:
-        case BUILTIN_LOG:
-            value_builtin(out, e->span, b, 2);
-            break;
+        case BUILTIN_LOG:  return value_builtin(e->span, b, 2); break;
 
+        case BUILTIN_HOLE: break;
         case BUILTIN_NONE:
-            break;
-
-        default:
-            UNREACHABLE();
+        default:           UNREACHABLE();
     }
-    return true;
+    return value_void(e->span);
 }
 
 // Evaluate an identifier
-static bool eval_ident(VM *v, Expr *e, Value *out)
+static Value *eval_ident(VM *v, Expr *e)
 {
     BuiltinKind builtin = builtin_kind(e);
     if (builtin != BUILTIN_NONE)
-        return eval_builtin(v, e, builtin, out);
+        return eval_builtin(v, e, builtin);
 
-    if (!symbol_get(v->scope, SV(e->as.id), out))
-        return value_errorf(out, e->span, "undefined symbol");
-    return true;
+    Value *out = scope_get_symbol(v->scope, SV(e->as.id));
+    return out ? out : value_errorf(e->span, "undefined symbol");
 }
 
 // Evaluate a prefix expression.
-static bool eval_prefix(VM *v, Expr *e, Value *out)
+static Value *eval_prefix(VM *v, Expr *e)
 {
-    if (!vm_eval_expr(v, e->as.prefix.expr, out))
-        return false;
+    Value *out = vm_eval_expr(v, e->as.prefix.expr);
+    if (value_is_err(out)) return out;
 
     switch (out->kind)
     {
@@ -106,7 +84,7 @@ static bool eval_prefix(VM *v, Expr *e, Value *out)
             {
                 case OP_NEG:
                     mpq_neg(out->as.exact, out->as.exact);
-                    return true;
+                    return out;
 
                 default:
                     break;
@@ -118,7 +96,7 @@ static bool eval_prefix(VM *v, Expr *e, Value *out)
             {
                 case OP_NEG:
                     out->as.real = cr_neg(out->as.real);
-                    return true;
+                    return out;
 
                 default:
                     break;
@@ -128,308 +106,320 @@ static bool eval_prefix(VM *v, Expr *e, Value *out)
         default:
             break;
     }
-    return value_errorf(out, e->span, "Invalid operation: '%s' %s", 
+
+    value_release(out);
+    return value_errorf(e->span, "Invalid operation: '%s' %s", 
             op_to_str[e->as.prefix.op],
             vk_to_str[out->kind]);
 }
 
 // Perform an mpq infix operation on two numbers wrapped in value.
-#define MPQ_INFIX(f, l, r) f((l)->as.exact, (l)->as.exact, (r)->as.exact)
+#define MPQ_INFIX(f, out, l, r) f((out)->as.exact, (l)->as.exact, (r)->as.exact)
 
 // Compare two numbers wrapped in value.
 #define MPQ_CMP(l, r) mpq_cmp((l)->as.exact, (r)->as.exact)
 
 // Evaluate one number raised to the power of the other.
-static bool eval_number_power(Value *l, Value *r)
+static Value *eval_number_power(Value *l, Value *r)
 {
-    if (mpz_cmp_ui(mpq_denref(r->as.exact), 1) == 0)
-    {
-        if (!mpz_fits_ulong_p(mpq_numref(r->as.exact)))
-            return value_errorf(l, r->span, "Exponent too large");
+    if (mpz_cmp_ui(mpq_denref(r->as.exact), 1) != 0)
+        return value_errorf(r->span, "Non-integer exponent is not supported");
 
-        unsigned long exp = mpz_get_ui(mpq_numref(r->as.exact));
-        mpz_pow_ui(mpq_numref(l->as.exact), mpq_numref(l->as.exact), exp);
-        mpz_pow_ui(mpq_denref(l->as.exact), mpq_denref(l->as.exact), exp);
-        mpq_canonicalize(l->as.exact);
-    }
-    else
+    if (!mpz_fits_ulong_p(mpq_numref(r->as.exact)))
+        return value_errorf(r->span, "Exponent too large");
+
+    Span s = {l->span.from, r->span.to};
+    Value *out = value_exact(s, l->as.exact);
+
+    unsigned long exp = mpz_get_ui(mpq_numref(r->as.exact));
+    mpz_pow_ui(mpq_numref(out->as.exact), mpq_numref(l->as.exact), exp);
+    mpz_pow_ui(mpq_denref(out->as.exact), mpq_denref(l->as.exact), exp);
+    mpq_canonicalize(out->as.exact);
+    return out;
+}
+
+// Evaluate comparison and equality between exact values.
+static Value *eval_exact_bool_infix(Value *l, Expr *e, Value *r)
+{
+    bool b;
+
+    switch (e->as.infix.op)
     {
-        return value_errorf(l, r->span, "Non-integer exponent is not supported");
+        case OP_LT:  b = MPQ_CMP(l, r) < 0;  break;
+        case OP_LEQ: b = MPQ_CMP(l, r) <= 0; break;
+        case OP_GT:  b = MPQ_CMP(l, r) > 0;  break;
+        case OP_GEQ: b = MPQ_CMP(l, r) >= 0; break;
+        case OP_EQ:  b = MPQ_CMP(l, r) == 0; break;
+        case OP_NEQ: b = MPQ_CMP(l, r) != 0; break;
+        default:     UNREACHABLE();
     }
-    return true;
+    return value_bool(e->span, b);
+}
+
+// Check is an operator is comparison or equality.
+static bool op_is_cmp_or_eq(Operator op)
+{
+    switch (op)
+    {
+        case OP_LT:
+        case OP_LEQ:
+        case OP_GT:
+        case OP_GEQ:
+        case OP_EQ:
+        case OP_NEQ:
+            return true;
+        default:
+            return false;
+    }
 }
 
 // Evaluate an infix operation between two exact numbers.
-static bool eval_exact_infix(Value *l, Expr *e, Value *r)
+static Value *eval_exact_infix(Value *l, Expr *e, Value *r)
 {
-    Span s = e->span;
-    l->span = s;
+    if (e->as.infix.op == OP_POW)
+        return eval_number_power(l, r);
+    if (op_is_cmp_or_eq(e->as.infix.op))
+        return eval_exact_bool_infix(l, e, r);
 
+    Value *out = value_exact(e->span, l->as.exact);
     switch (e->as.infix.op)
     {
-        case OP_ADD: MPQ_INFIX(mpq_add, l, r); break;
-        case OP_SUB: MPQ_INFIX(mpq_sub, l, r); break;
-        case OP_MUL: MPQ_INFIX(mpq_mul, l, r); break;
+        case OP_ADD: MPQ_INFIX(mpq_add, out, l, r); break;
+        case OP_SUB: MPQ_INFIX(mpq_sub, out, l, r); break;
+        case OP_MUL: MPQ_INFIX(mpq_mul, out, l, r); break;
 
         case OP_DIV:
             if (mpq_cmp_ui(r->as.exact, 0, 1) == 0)
-                return value_errorf(l, r->span, "Division by zero");
-            MPQ_INFIX(mpq_div, l, r);
+            {
+                value_release(out);
+                return value_errorf(r->span, "Division by zero");
+            }
+            MPQ_INFIX(mpq_div, out, l, r);
             break;
 
-        case OP_POW: return eval_number_power(l, r);
-
-        case OP_LT:  value_bool(l, s, MPQ_CMP(l, r) < 0);  break;
-        case OP_LEQ: value_bool(l, s, MPQ_CMP(l, r) <= 0); break;
-        case OP_GT:  value_bool(l, s, MPQ_CMP(l, r) > 0);  break;
-        case OP_GEQ: value_bool(l, s, MPQ_CMP(l, r) >= 0); break;
-        case OP_EQ:  value_bool(l, s, MPQ_CMP(l, r) == 0); break;
-        case OP_NEQ: value_bool(l, s, MPQ_CMP(l, r) != 0); break;
-
-        default:     return value_errorf(l, s, "Unknown operator");
+        default:
+            value_release(out);
+            return value_errorf(e->span, "Unknown operator");
     }
-    return true;
+    return out;
 }
 
 // Evaluate infix between two real numbers.
-static bool eval_real_infix(Value *l, Expr *e, Value *r)
+static Value *eval_real_infix(Value *l, Expr *e, Value *r)
 {
-    Span s = e->span;
-    l->span = s;
-
+    CR *n = NULL;
     switch (e->as.infix.op)
     {
-        case OP_ADD:  value_real(l, s, cr_add(l->as.real, r->as.real)); break;
-        case OP_SUB:  value_real(l, s, cr_sub(l->as.real, r->as.real)); break;
-        case OP_MUL:  value_real(l, s, cr_mul(l->as.real, r->as.real)); break;
-        case OP_DIV:  value_real(l, s, cr_div(l->as.real, r->as.real)); break;
-
-        default:     return value_errorf(l, s, "Unknown operator");
+        case OP_ADD: n = cr_add(l->as.real, r->as.real); break;
+        case OP_SUB: n = cr_sub(l->as.real, r->as.real); break;
+        case OP_MUL: n = cr_mul(l->as.real, r->as.real); break;
+        case OP_DIV: n = cr_div(l->as.real, r->as.real); break;
+        default:     return value_errorf(e->span, "Unknown operator");
     }
-    return true;
+    return value_real(e->span, n);
 }
 
 // Evaluate an infix operation between two booleans.
-static bool eval_bool_infix(Value *l, Expr *e, Value *r)
+static Value *eval_bool_infix(Value *l, Expr *e, Value *r)
 {
-    Span s = e->span;
-    l->span = s;
-
     bool lb = value_to_bool(l);
     bool rb = value_to_bool(r);
+    bool vb = false;
 
     switch (e->as.infix.op)
     {
-        case OP_EQ:  value_bool(l, s, lb == rb); break;
-        case OP_NEQ: value_bool(l, s, lb != rb); break;
-        default:     return value_errorf(l, s, "Unknown operator");
+        case OP_EQ:  vb = lb == rb; break;
+        case OP_NEQ: vb = lb != rb; break;
+        default:     return value_errorf(e->span, "Unknown operator");
     }
-    return true;
+    return value_bool(e->span, vb);
 }
 
 // Evaluate an assignment infix operation.
-static bool eval_assign_infix(VM *v, Expr *e, Value *out)
+static Value *eval_assign_infix(VM *v, Expr *e)
 {
     Expr *l = e->as.infix.left;
-
     if (l->kind != EXPR_IDENT)
-        return value_errorf(out, l->span, "Expected identifier");
+        return value_errorf(l->span, "Expected identifier");
 
     BuiltinKind builtin = builtin_kind(l);
     if (builtin != BUILTIN_NONE && builtin != BUILTIN_HOLE)
-        return value_errorf(out, l->span, "Cannot assign to builtin identifier");
+        return value_errorf(l->span, "Cannot assign to builtin identifier");
 
-    if (!vm_eval_expr(v, e->as.infix.right, out))
-        return false;
+    Value *out = vm_eval_expr(v, e->as.infix.right);
+    if (value_is_err(out)) return out;
 
     if (builtin != BUILTIN_HOLE)
     {
         if (out->kind == VAL_LAMBDA)
-            symbol_set(out->as.lambda.env, SV(l->as.id), out);
-
-        symbol_set(v->scope, SV(l->as.id), out);
+            scope_set_symbol(out->as.lambda.env, SV(l->as.id), out);
+        scope_set_symbol(v->scope, SV(l->as.id), out);
     }
-    return true;
+    return out;
 }
 
 // Evaluate a lambda application.
-static bool eval_lambda_apply(VM *v, Expr *f, Value *out)
+static Value *eval_lambda_apply(VM *v, Value *f, Value *arg)
 {
-    if (f->as.lambda.param->kind == EXPR_IDENT)
-        symbol_set(v->scope, SV(f->as.lambda.param->as.id), out);
-    return vm_eval_expr(v, f->as.lambda.body, out);
+    Scope *s = scope_from(f->as.lambda.env);
+    Scope *prev = v->scope;
+    v->scope = s;
+
+    Expr *func = f->as.lambda.expr;
+    if (func->as.lambda.param->kind == EXPR_IDENT)
+        scope_set_symbol(v->scope, SV(func->as.lambda.param->as.id), arg);
+    Value *out = vm_eval_expr(v, func->as.lambda.body);
+
+    v->scope = prev;
+    scope_free(s);
+    return out;
 }
 
 // Evaluate a builtin bool application.
-static bool eval_builtin_bool(Value *f, Value *out)
+static Value *eval_builtin_bool(Value *f, Value *arg)
 {
-    if (!value_is_bool(f)) return true;
-    // value_free(out);
-    value_set(out, &da_at(&f->as.builtin.args, 0));
-    return true;
+    if (!value_to_bool(f)) return arg;
+    return value_retain(da_at(&f->as.builtin.args, 0));
 }
 
 // Evaluate a builtin unary function on real values.
-static bool eval_builtin_real_unary(Value *out, CRUnary fn)
+static Value *eval_builtin_real_unary(CRUnary fn, Value *arg)
 {
     CR *x = NULL;
-    switch (out->kind)
+    switch (arg->kind)
     {
-        case VAL_REAL : x = out->as.real;               break;
-        case VAL_EXACT: x = cr_from_mpq(out->as.exact); break;
-        default:        return value_errorf(out, out->span, "Invalid argument");
+        case VAL_REAL : x = arg->as.real;               break;
+        case VAL_EXACT: x = cr_from_mpq(arg->as.exact); break;
+        default:        return value_errorf(arg->span, "Invalid argument");
     }
-    value_free(out);
-    value_real(out, out->span, fn(x));
+    Value *out = value_real(arg->span, fn(x));
     cr_release(x);
-    return true;
+    return out;
 }
 
 // Evaluate builtin application.
-static bool eval_builtin_apply(VM *v, Value *f, Value *out)
+static Value *eval_builtin_apply(VM *v, Value *f, Value *arg)
 {
-    bool ok = true;
-
     if (f->as.builtin.args.len + 1 < f->as.builtin.arity)
     {
-        da_grow(&f->as.builtin.args);
-        Value *ptr = &f->as.builtin.args.data[f->as.builtin.args.len++];
-        value_set(ptr, out);
-        // value_free(out);
-        value_set(out, f);
-        return true;
+        da_append(&f->as.builtin.args, value_retain(arg));
+        return value_retain(f);
     }
 
     switch (f->as.builtin.kind)
     {
         case BUILTIN_TRUE:
-        case BUILTIN_FALSE: ok = eval_builtin_bool(f, out);             break;
-        case BUILTIN_SQRT:  ok = eval_builtin_real_unary(out, cr_sqrt); break;
-        case BUILTIN_EXP:   ok = eval_builtin_real_unary(out, cr_exp);  break;
-        case BUILTIN_LN:    ok = eval_builtin_real_unary(out, cr_ln);   break;
+        case BUILTIN_FALSE: return eval_builtin_bool(f, arg);
+        case BUILTIN_SQRT:  return eval_builtin_real_unary(cr_sqrt, arg);
+        case BUILTIN_EXP:   return eval_builtin_real_unary(cr_exp, arg);
+        case BUILTIN_LN:    return eval_builtin_real_unary(cr_ln, arg);
 
-        case BUILTIN_HOLE:
+        case BUILTIN_HOLE:  return value_errorf(f->span, "Expected lambda");
         case BUILTIN_ANS:
-            break;
-
-        default:
-            UNREACHABLE();
+        default:            UNREACHABLE();
     }
-
-    return ok;
 }
 
 // Evaluate an application expression.
-static bool eval_apply(VM *v, Expr *f, Expr *a, Value *out)
+static Value *eval_apply(VM *v, Expr *f, Expr *a)
 {
-    bool ok = true;
+    Value *func = vm_eval_expr(v, f);
+    if (value_is_err(func)) return func;
 
-    Value func = {0};
-    if (!vm_eval_expr(v, f, &func))
+    Value *arg = vm_eval_expr(v, a);
+    if (value_is_err(arg))
     {
-        value_set(out, &func);
-        value_free(&func);
-        return false;
+        value_release(func);
+        return arg;
     }
 
-    if (!vm_eval_expr(v, a, out))
+    Value *out = NULL;
+
+    switch (func->kind)
     {
-        value_free(&func);
-        return false;
+        case VAL_LAMBDA:  out = eval_lambda_apply(v, func, arg);  break;
+        case VAL_BUILTIN: out = eval_builtin_apply(v, func, arg); break;
+        default:          out = value_errorf(f->span, "Invalid application of %s", vk_to_str[func->kind]);
+                          break;
     }
 
-    Scope *s = scope_from(func.as.lambda.env);
-    Scope *prev = v->scope;
-    v->scope = s;
-
-    switch (func.kind)
-    {
-        case VAL_LAMBDA:  ok = eval_lambda_apply(v, func.as.lambda.expr, out); break;
-        case VAL_BUILTIN: ok = eval_builtin_apply(v, &func, out);              break;
-        default:
-              ok = value_errorf(out, f->span, 
-                      "Invalid application to %s", vk_to_str[func.kind]);
-              break;
-    }
-
-    scope_free(s);
-    v->scope = prev;
-    value_free(&func);
-    return ok;
+    value_release(func);
+    value_release(arg);
+    return out;
 }
 
 // Evaluate an infix operation.
-static bool eval_infix(VM *v, Expr *e, Value *out)
+static Value *eval_infix(VM *v, Expr *e)
 {
     if (e->as.infix.op == OP_ASSIGN)
-        return eval_assign_infix(v, e, out);
+        return eval_assign_infix(v, e);
 
     if (e->as.infix.op == OP_APPLY || e->as.infix.op == OP_PIPE)
-        return eval_apply(v, e->as.infix.left, e->as.infix.right, out);
+        return eval_apply(v, e->as.infix.left, e->as.infix.right);
 
-    bool ok = false;
+    Value *l = vm_eval_expr(v, e->as.infix.left);
+    if (value_is_err(l)) return l;
 
-    if (!vm_eval_expr(v, e->as.infix.left, out))
-        return false;
-
-    Value r = {0};
-    if (!vm_eval_expr(v, e->as.infix.right, &r))
+    Value *r = vm_eval_expr(v, e->as.infix.right);
+    if (value_is_err(r))
     {
-        value_set(out, &r);
-        goto cleanup;
+        value_release(l);
+        return r;
     }
 
-    bool same_kind  = out->kind == r.kind;
-    bool both_exact = same_kind && out->kind == VAL_EXACT;
-    bool both_real  = same_kind && out->kind == VAL_REAL;
-    bool one_real   = (out->kind == VAL_REAL && r.kind == VAL_EXACT)
-                        || (out->kind == VAL_EXACT && r.kind == VAL_REAL);
-    bool both_bool  = same_kind && value_is_bool(out);
+    bool same_kind  = l->kind == r->kind;
+    bool both_exact = same_kind && l->kind == VAL_EXACT;
+    bool both_real  = same_kind && l->kind == VAL_REAL;
+    bool one_real   = (l->kind == VAL_REAL && r->kind == VAL_EXACT)
+                        || (l->kind == VAL_EXACT && r->kind == VAL_REAL);
+    bool both_bool  = same_kind && value_is_bool(l);
 
+    Value *out = NULL;
     if (both_exact)
     {
-        ok = eval_exact_infix(out, e, &r);
+        out = eval_exact_infix(l, e, r);
     }
-    else if (both_real)
+    else if (both_real || one_real)
     {
-        ok = eval_real_infix(out, e, &r);
-    }
-    else if (one_real)
-    {
-        Value *exact = out->kind == VAL_REAL ? &r : out;
-        CR *n = cr_from_mpq(exact->as.exact);
-        Span span = exact->span;
-        value_free(exact);
-        value_real(exact, span, n);
+        Value *lr = l;
+        Value *rr = r;
 
-        ok = eval_real_infix(out, e, &r);
+        if (l->kind == VAL_EXACT)
+            lr = value_real(l->span, cr_from_mpq(l->as.exact));
+        if (r->kind == VAL_EXACT)
+            rr = value_real(r->span, cr_from_mpq(r->as.exact));
+
+        out = eval_real_infix(lr, e, rr);
+
+        if (l->kind == VAL_EXACT)
+            value_release(lr);
+        if (l->kind == VAL_EXACT)
+            value_release(rr);
     }
     else if (both_bool)
     {
-        ok = eval_bool_infix(out, e, &r);
+        out = eval_bool_infix(l, e, r);
     }
     else
     {
-        ok = value_errorf(out, e->span,
-                "Invalid operation: %s '%s' %s",
-                vk_to_str[out->kind], op_to_str[e->as.infix.op], vk_to_str[r.kind]);
+        out = value_errorf(e->span, "Invalid operation: %s '%s' %s",
+                vk_to_str[l->kind], op_to_str[e->as.infix.op], vk_to_str[r->kind]);
     }
 
-cleanup:
-    value_free(&r);
-    return ok;
+    value_release(l);
+    value_release(r);
+    return out;
 }
 
 // Capture free variables from the current scope that are no shadowed by params.
 static void capture_free_vars(VM *v, Expr *e, Scope *s)
 {
-    Value tmp = {0};
-
     switch (e->kind)
     {
         case EXPR_IDENT:
-            if (symbol_get(v->scope, SV(e->as.id), &tmp))
-                symbol_set(s, SV(e->as.id), &tmp);
+            Value *capture = scope_get_symbol(v->scope, SV(e->as.id));
+            if (capture)
+                scope_set_symbol(s, SV(e->as.id), capture);
             break;
 
         case EXPR_INFIX:
@@ -458,83 +448,91 @@ static void capture_free_vars(VM *v, Expr *e, Scope *s)
         default:
             UNREACHABLE();
     }
-    value_free(&tmp);
 }
 
 // Evaluate a lambda expression.
-static bool eval_lambda(VM *v, Expr *e, Value *out)
+static Value *eval_lambda(VM *v, Expr *e)
 {
     Scope *s = scope_from(NULL);
     capture_free_vars(v, e->as.lambda.body, s);
-
-    value_lambda(out, e, s);
-    return true;
+    return value_lambda(e, s);
 }
 
 // Evaluate a conditional expression.
-static bool eval_cond(VM *v, Expr *e, Value *out)
+static Value *eval_cond(VM *v, Expr *e)
 {
-    if (!vm_eval_expr(v, e->as.cond.if_, out))
-        return false;
-    if (!value_is_bool(out))
-        return value_errorf(out, e->as.cond.if_->span, "Expected bool");
+    Value *cond = vm_eval_expr(v, e->as.cond.if_);
+    if (value_is_err(cond)) return cond;
 
-    return value_to_bool(out)
-        ? vm_eval_expr(v, e->as.cond.then, out)
-        : vm_eval_expr(v, e->as.cond.else_, out);
+    if (!value_is_bool(cond))
+    {
+        value_release(cond);
+        return value_errorf(e->as.cond.if_->span, "Expected bool");
+    }
+
+    Value *out = value_to_bool(cond)
+        ? vm_eval_expr(v, e->as.cond.then)
+        : vm_eval_expr(v, e->as.cond.else_);
+
+    value_release(cond);
+    return out;
 }
 
 // Evaluate an expression.
-bool vm_eval_expr(VM *v, Expr *e, Value *out)
+Value *vm_eval_expr(VM *v, Expr *e)
 {
-    bool ok = true;
-
-    DEV_MUST(v && e && out);
-    out->kind = VAL_VOID;
-
     if (is_error(e))
-        return value_error_from_expr(out, e);
+        return value_error_from_expr(e);
+
+    Value *out = NULL;
 
     switch (e->kind)
     {
-        case EXPR_NUMBER: ok = eval_number(e, out);    break;
-        case EXPR_IDENT:  ok = eval_ident(v, e, out);  break;
-        case EXPR_INFIX:  ok = eval_infix(v, e, out);  break;
-        case EXPR_PREFIX: ok = eval_prefix(v, e, out); break;
-        case EXPR_LAMBDA: ok = eval_lambda(v, e, out); break;
-        case EXPR_COND:   ok = eval_cond(v, e, out);   break;
+        case EXPR_NUMBER: out = eval_number(e);    break;
+        case EXPR_IDENT:  out = eval_ident(v, e);  break;
+        case EXPR_INFIX:  out = eval_infix(v, e);  break;
+        case EXPR_PREFIX: out = eval_prefix(v, e); break;
+        case EXPR_LAMBDA: out = eval_lambda(v, e); break;
+        case EXPR_COND:   out = eval_cond(v, e);   break;
         default:          UNREACHABLE();
     }
 
-    if (ok)
-        value_set(v->last, out);
-    return ok;
+    if (!value_is_err(out))
+    {
+        if (v->last) value_release(v->last);
+        v->last = value_retain(out);
+    }
+    return out;
 }
 
 // Run and evaluate a source.
-bool vm_run(VM *v, StringView src, Value *out)
+Value *vm_run(VM *v, StringView src)
 {
+    Value *out = NULL;
+
     Module m;
     da_init(&m);
 
-    bool ok = parse_module(src, v->base, &m);
-    if (!ok)
+    if (!parse_module(src, v->base, &m))
     {
-        value_error_from_expr(out, da_last(&m));
-        module_free(&m);
+        out = value_error_from_expr(da_last(&m));
+        goto cleanup;
     }
 
     DA_FOR(&m, i)
     {
         Expr *e = da_at(&m, i);
-        if (!vm_eval_expr(v, e, out))
-        {
-            module_free(&m);
-            return false;
-        }
+        out = vm_eval_expr(v, e);
+        if (value_is_err(out))
+            goto cleanup;
+
+        if (i < m.len-1)
+            value_release(out);
     }
+
+cleanup:
     module_free(&m);
-    return ok;
+    return out;
 }
 
 // Render the current environment of the VM.
@@ -549,7 +547,7 @@ void vm_env_render(VM *v, String *sb, RenderCtx *ctx)
     {
         Symbol sym = da_at(v->scope, i);
         str_appendf(sb, "    "SV_FMT" = ", SV_ARG(SV(sym.id)));
-        value_render(&sym.value, sb, ctx);
+        value_render(sym.value, sb, ctx);
         str_append(sb, "\n");
     }
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);

@@ -25,125 +25,130 @@ const char *builtin_to_str[] = {
     [BUILTIN_LN]    = "ln",
 };
 
-// Intializes an exact value.
-void value_exact(Value *v, Span span)
+static Value *value_new(ValueKind kind, Span span)
 {
-    DEV_MUST(v);
-    v->kind = VAL_EXACT;
+    Value *v = malloc(sizeof(Value));
+    memset(v, 0, sizeof(*v));
+    v->kind = kind;
     v->span = span;
+    v->refcount = 1;
+    return v;
+}
+
+Value *value_void(Span span)
+{
+    return value_new(VAL_VOID, span);
+}
+
+Value *value_exact(Span span, const mpq_t n)
+{
+    Value *v = value_new(VAL_EXACT, span);
     mpq_init(v->as.exact);
+    mpq_set(v->as.exact, n);
+    return v;
 }
 
-// Initializes a real value.
-void value_real(Value *v, Span span, CR *n)
+Value *value_real(Span span, CR *n)
 {
-    DEV_MUST(v);
-    v->kind = VAL_REAL;
-    v->span = span;
+    Value *v = value_new(VAL_REAL, span);
     v->as.real = n;
+    return v;
 }
 
-// Intializes a builtin value.
-void value_builtin(Value *v, Span span, BuiltinKind kind, size_t arity)
+Value *value_builtin(Span span, BuiltinKind kind, size_t arity)
 {
-    DEV_MUST(v);
-    v->kind = VAL_BUILTIN;
-    v->span = span;
+    Value *v = value_new(VAL_BUILTIN, span);
     v->as.builtin.kind = kind;
     v->as.builtin.arity = arity;
     da_init(&v->as.builtin.args);
+    return v;
 }
 
-// Intializes a bool value.
-void value_bool(Value *v, Span span, bool b)
+Value *value_bool(Span span, bool b)
 {
-    value_builtin(v, span, b ? BUILTIN_TRUE : BUILTIN_FALSE, 2);
+    return value_builtin(span, b ? BUILTIN_TRUE : BUILTIN_FALSE, 2);
 }
 
-// Initializes a lambda value.
-void value_lambda(Value *v, Expr *e, Scope *s)
+Value *value_lambda(Expr *e, Scope *s)
 {
-    DEV_MUST(v);
-    DEV_MUST(e->kind == EXPR_LAMBDA);
-    v->kind = VAL_LAMBDA;
-    v->span = e->span;
+    Value *v = value_new(VAL_LAMBDA, e->span);
     v->as.lambda.expr = expr_clone(e);
     v->as.lambda.env = s;
+    s->refcount++;
+    return v;
 }
 
-// Initializes an error value with message.
-bool value_errorf(Value *v, Span span, const char *fmt, ...)
+Value *value_errorf(Span span, const char *fmt, ...)
 {
-    v->kind = VAL_ERROR;
-    v->span = span;
+    Value *v = value_new(VAL_ERROR, span);
     str_init(&v->as.error);
 
     va_list args;
     va_start(args, fmt);
     str_appendvf(&v->as.error, fmt, args);
     va_end(args);
-    return false;
+    return v;
 }
 
-// Initializes a error value from an error expression.
-bool value_error_from_expr(Value *v, const Expr *e)
+Value *value_error_from_expr(const Expr *e)
 {
     DEV_MUST(is_error(e));
-
-    v->kind = VAL_ERROR;
-    v->span = e->span;
+    Value *v = value_new(VAL_ERROR, e->span);
     str_init_with(&v->as.error, &e->as.err);
-
-    return false;
+    return v;
 }
 
-// Set a value from another value.
-void value_set(Value *v, const Value *from)
+Value *value_retain(Value *from)
 {
-    v->kind = from->kind;
-    v->span = from->span;
+    if (from) from->refcount++;
+    return from;
+}
+
+Value *value_clone(const Value *from)
+{
+    DEV_MUST("value_clone is not deep clone");
+    Value *v = NULL;
     switch (from->kind)
     {
         case VAL_VOID:
-            v->kind = VAL_VOID;
+            v = value_new(VAL_VOID, from->span);
             break;
 
         case VAL_EXACT:
-            value_exact(v, from->span);
-            mpq_set(v->as.exact, from->as.exact);
-            mpq_canonicalize(v->as.exact);
+            v = value_exact(from->span, from->as.exact);
             break;
 
         case VAL_ERROR:
-            str_init_with(&v->as.error, &from->as.error);
+            v = value_errorf(from->span, SV_FMT, SV_ARG(SV(from->as.error)));
             break;
 
         case VAL_REAL:
-            v->as.real = cr_retain(from->as.real);
+            v = value_real(from->span, cr_retain(from->as.real));
             break;
 
         case VAL_LAMBDA:
-            Expr *l = from->as.lambda.expr;
-            v->as.lambda.expr = expr_lambda(l->as.lambda.param, l->as.lambda.body);
-            v->as.lambda.env = from->as.lambda.env;
-            v->as.lambda.env->refcount++;
+            v = value_lambda(from->as.lambda.expr, v->as.lambda.env);
             break;
 
         case VAL_BUILTIN:
-            v->as.builtin.kind = from->as.builtin.kind;
-            v->as.builtin.arity = from->as.builtin.arity;
-            da_clone(&v->as.builtin.args, &from->as.builtin.args);
+            v = value_builtin(from->span, from->as.builtin.kind, from->as.builtin.arity);
+            DA_FOR(&from->as.builtin.args, i)
+            {
+                Value *v = da_at(&from->as.builtin.args, i);
+                da_append(&v->as.builtin.args, value_retain(v));
+            }
             break;
 
         default:
             UNREACHABLE();
     }
+    return v;
 }
 
-// Free the value.
-void value_free(Value *v)
+void value_release(Value *v)
 {
-    if (!v) return;
+    if (!v || --v->refcount > 0) return;
+
     switch (v->kind)
     {
         case VAL_EXACT:
@@ -160,14 +165,10 @@ void value_free(Value *v)
 
         case VAL_LAMBDA:
             expr_destroy(&v->as.lambda.expr);
-            if (v->as.lambda.env->refcount == 0)
+            if (--v->as.lambda.env->refcount == 0)
             {
                 scope_free(v->as.lambda.env);
                 free(v->as.lambda.env);
-            }
-            else
-            {
-                v->as.lambda.env->refcount--;
             }
             break;
 
@@ -181,7 +182,6 @@ void value_free(Value *v)
         default:
             UNREACHABLE();
     }
-    memset(v, 0, sizeof(*v));
 }
 
 // Checks if a value is a bool value.
@@ -230,7 +230,7 @@ void scope_free(Scope *s)
         Symbol sym = da_at(s, i);
         str_free(sym.id);
         free(sym.id);
-        value_free(&sym.value);
+        value_release(sym.value);
     }
     da_free(s);
 }
@@ -254,30 +254,30 @@ Scope *scope_from(Scope *parent)
 }
 
 // Assign a symbol to the scope.
-void symbol_set(Scope *scope, StringView id, const Value *value)
+void scope_set_symbol(Scope *scope, StringView id, Value *value)
 {
+    if (!value) return;
+
+    Value *new_value = value_retain(value);
     DA_FOR(scope, i)
     {
         Symbol *existing = &da_at(scope, i);
         if (sv_equal(existing->id, id))
         {
-            value_free(&existing->value);
-            if (value)
-                value_set(&existing->value, value);
+            value_release(existing->value);
+            existing->value = new_value;
             return;
         }
     }
     Symbol s = {0};
     s.id = malloc(sizeof(String));
     str_init_with(s.id, id);
-
-    if (value)
-        value_set(&s.value, value);
+    s.value = new_value;
     da_append(scope, s);
 }
 
 // Find a symbol from the scope.
-bool symbol_get(Scope *scope, StringView id, Value *out)
+Value *scope_get_symbol(Scope *scope, StringView id)
 {
     while (scope)
     {
@@ -286,15 +286,12 @@ bool symbol_get(Scope *scope, StringView id, Value *out)
             Symbol existing = da_at(scope, i);
             if (sv_equal(existing.id, id))
             {
-                if (existing.value.kind == VAL_VOID)
-                    return false;
-                value_set(out, &existing.value);
-                return true;
+                return value_retain(existing.value);
             }
         }
         scope = scope->parent;
     }
-    return false;
+    return NULL;
 }
 
 // Render an exact value.
@@ -370,7 +367,7 @@ static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
         for (int i = 0; i < applied; i++)
         {
             str_append(sb, " ");
-            value_render(&da_at(&v->as.builtin.args, i), sb, ctx);
+            value_render(da_at(&v->as.builtin.args, i), sb, ctx);
             if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
         }
 
@@ -397,8 +394,6 @@ static bool svlist_contains(SVList *sl, StringView v)
 // Render an expression with identifiers substituted.
 static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, RenderCtx *ctx)
 {
-    Value tmp = {0};
-
     switch (e->kind)
     {
         case EXPR_LAMBDA:
@@ -412,16 +407,26 @@ static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, Ren
             break;
 
         case EXPR_IDENT:
-            if (!svlist_contains(params, SV(e->as.id)) && symbol_get(s, SV(e->as.id), &tmp))
+            Value *existing = scope_get_symbol(s, SV(e->as.id));
+            if (!existing)
             {
-                if (tmp.kind != VAL_LAMBDA || s != tmp.as.lambda.env)
-                {
-                    value_render(&tmp, sb, ctx);
-                    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-                    break;
-                }
+                expr_render(e, sb);
+                break;
             }
-            expr_render(e, sb);
+
+            bool is_self = existing->kind == VAL_LAMBDA 
+                && existing->as.lambda.env == s;
+            bool is_param = svlist_contains(params, SV(e->as.id));
+
+            if (is_self || is_param)
+            {
+                expr_render(e, sb);
+                break;
+            }
+
+            value_render(existing, sb, ctx);
+            if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+            value_release(existing);
             break;
 
         case EXPR_PREFIX:
@@ -442,7 +447,6 @@ static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, Ren
             expr_render(e, sb);
             break;
     }
-    value_free(&tmp);
 }
 
 // Render a lambda value;

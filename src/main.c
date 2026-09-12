@@ -156,8 +156,6 @@ void repl_start(VM *vm, RenderCtx *ctx)
     str_reserve(&out, 1024);
     char *line;
 
-    Value value = {0};
-
     for (;;)
     {
         line = readline("ccal> ");
@@ -175,10 +173,10 @@ void repl_start(VM *vm, RenderCtx *ctx)
             continue;
         }
 
-        vm_run(vm, src, &value);
+        Value *result = vm_run(vm, src);
 
         ctx->src = src;
-        value_render(&value, &out, ctx);
+        value_render(result, &out, ctx);
         printf(SV_FMT"\n", SV_ARG(SV(out)));
 
         str_reset(&out);
@@ -194,11 +192,10 @@ int run_eval(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
     String s;
     str_reserve(&s, 1024);
 
-    Value value = {0};
-
-    bool ok = vm_run(vm, src, &value);
+    Value *result = vm_run(vm, src);
+    bool ok = !value_is_err(result);
     ctx->src =src;
-    value_render(&value, &s, ctx);
+    value_render(result, &s, ctx);
     fprintf(fdout, SV_FMT"\n", SV_ARG(SV(s)));
 
     return ok ? 0 : 1;

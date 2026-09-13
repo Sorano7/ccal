@@ -98,7 +98,6 @@ typedef struct Expr
     ExprKind kind;
 } Expr;
 
-void expr_free(Expr *e);
 void expr_destroy(Expr **ep);
 
 #define is_error(e) (e->kind == EXPR_ERROR)

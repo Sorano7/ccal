@@ -16,10 +16,11 @@ static Expr *expr_new(ExprKind kind, Span span)
     return e;
 }
 
-// Free an expression recursively.
-void expr_free(Expr *e)
+// Free an expression's content and itself.
+void expr_destroy(Expr **ep)
 {
-    if (!e) return;
+    if (!ep || !*ep) return;
+    Expr *e = *ep;
     switch (e->kind)
     {
         case EXPR_ERROR:
@@ -35,25 +36,30 @@ void expr_free(Expr *e)
             break;
 
         case EXPR_INFIX:
-            expr_free(e->as.infix.left);
-            expr_free(e->as.infix.right);
+            expr_destroy(&e->as.infix.left);
+            expr_destroy(&e->as.infix.right);
             break;
 
         case EXPR_PREFIX:
-            expr_free(e->as.prefix.expr);
+            expr_destroy(&e->as.prefix.expr);
+            break;
+
+        case EXPR_LAMBDA:
+            expr_destroy(&e->as.lambda.param);
+            expr_destroy(&e->as.lambda.body);
+            break;
+
+        case EXPR_COND:
+            expr_destroy(&e->as.cond.if_);
+            expr_destroy(&e->as.cond.then);
+            expr_destroy(&e->as.cond.else_);
             break;
 
         default:
-            break;
+            UNREACHABLE();
     }
-}
-
-// Free an expression's content and itself.
-void expr_destroy(Expr **ep)
-{
-    if (!ep || !*ep) return;
-    expr_free(*ep);
     free(*ep);
+    *ep = NULL;
 }
 
 // Allocate an error expression with span and message.

@@ -151,11 +151,7 @@ void value_release(Value *v)
 
         case VAL_LAMBDA:
             expr_destroy(&v->as.lambda.expr);
-            if (--v->as.lambda.env->refcount == 0)
-            {
-                scope_free(v->as.lambda.env);
-                free(v->as.lambda.env);
-            }
+            scope_release(v->as.lambda.env);
             break;
 
         case VAL_BUILTIN:
@@ -168,6 +164,7 @@ void value_release(Value *v)
         default:
             UNREACHABLE();
     }
+    free(v);
 }
 
 // Checks if a value is a bool value.
@@ -223,8 +220,10 @@ BuiltinKind builtin_kind(Expr *e)
 }
 
 // Free a scope and all of its symbols.
-void scope_free(Scope *s)
+void scope_release(Scope *s)
 {
+    if (--s->refcount > 0) return;
+
     DA_FOR(s, i)
     {
         Symbol sym = da_at(s, i);
@@ -233,14 +232,18 @@ void scope_free(Scope *s)
         value_release(sym.value);
     }
     da_free(s);
+    free(s);
 }
 
 // Recursively free a scope.
-void scope_free_r(Scope *s)
+void scope_release_r(Scope *s)
 {
-    scope_free(s);
-    while ((s = s->parent))
-        scope_free(s);
+    while (s)
+    {
+        Scope *next = s->parent;
+        scope_release(s);
+        s = next;
+    }
 }
 
 // Create a new scope from a parent.
@@ -249,7 +252,7 @@ Scope *scope_from(Scope *parent)
     Scope *s = malloc(sizeof(Scope));
     da_init(s);
     s->parent = parent;
-    s->refcount = 0;
+    s->refcount = 1;
     return s;
 }
 
@@ -476,6 +479,7 @@ static void value_render_real(Value *v, String *sb, RenderCtx *ctx)
     cr_eval(v->as.real, ctx->prec, result);
 
     render_creal(sb, result, ctx->base, ctx->max_digits);
+    mpfi_clear(result);
 
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }

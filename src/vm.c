@@ -14,7 +14,7 @@ void vm_init(VM *v)
 // Reset the state of a VM.
 void vm_reset(VM *v)
 {
-    scope_free_r(v->scope);
+    scope_release_r(v->scope);
     v->scope = scope_from(NULL);
     if (v->last) value_release(v->last);
     v->last = NULL;
@@ -24,7 +24,7 @@ void vm_reset(VM *v)
 // Free a VM.
 void vm_free(VM *v)
 {
-    scope_free_r(v->scope);
+    scope_release_r(v->scope);
     if (v->last) value_release(v->last);
 }
 
@@ -270,7 +270,7 @@ static Value *eval_lambda_apply(VM *v, Value *f, Value *arg)
     Value *out = vm_eval_expr(v, func->as.lambda.body);
 
     v->scope = prev;
-    scope_free(s);
+    scope_release(s);
     return out;
 }
 

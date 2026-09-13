@@ -186,8 +186,8 @@ void repl_start(VM *vm, RenderCtx *ctx)
     str_free(&out);
 }
 
-// Run/evaluate a single expression and return the exit code.
-int run_eval(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
+// Run/evaluate a single expression.
+bool run_eval(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
 {
     String s;
     str_reserve(&s, 1024);
@@ -198,7 +198,9 @@ int run_eval(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
     value_render(result, &s, ctx);
     fprintf(fdout, SV_FMT"\n", SV_ARG(SV(s)));
 
-    return ok ? 0 : 1;
+    value_release(result);
+    str_free(&s);
+    return ok;
 }
 
 int main(int argc, char **argv)
@@ -234,6 +236,8 @@ int main(int argc, char **argv)
     cut_fp_add_flag(&fp, &decimal,  SV("decimal"),  .short_name='d');
 
     cut_fp_parse(&fp, argc, argv, &args);
+    StringView cmd = cut_fp_get_command(&fp, argc, argv);
+    cut_fp_free(&fp);
 
     if (decimal && rational)
     {
@@ -244,7 +248,8 @@ int main(int argc, char **argv)
     if (decimal)
         ctx.num_form = NUMBER_DECIMAL;
 
-    StringView cmd = cut_fp_get_command(&fp, argc, argv);
+    bool ok = true;
+
     if (sv_equal(cmd, "help"))
     {
         printf(cli_help);
@@ -262,12 +267,16 @@ int main(int argc, char **argv)
 
         svlist_join(&args, &sb, SV(" "));
 
-        return run_eval(&vm, stdout, SV(sb), &ctx);
+        ok = run_eval(&vm, stdout, SV(sb), &ctx);
+
+        str_free(&sb);
     }
     else
     {
         repl_start(&vm, &ctx);
     }
 
-    return 0;
+    da_free(&args);
+    vm_free(&vm);
+    return ok ? 0 : 1;
 }

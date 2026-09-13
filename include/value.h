@@ -118,8 +118,8 @@ bool value_to_bool(const Value *v);
 
 BuiltinKind builtin_kind(Expr *e);
 
-void scope_free(Scope *s);
-void scope_free_r(Scope *s);
+void scope_release(Scope *s);
+void scope_release_r(Scope *s);
 Scope *scope_from(Scope *parent);
 
 void scope_set_symbol(Scope *scope, StringView id, Value *value);

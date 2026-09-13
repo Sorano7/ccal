@@ -109,7 +109,7 @@ Value *value_error_from_expr(const Expr *e);
 
 Value *value_retain(Value *from);
 Value *value_clone(const Value *from);
-void value_release(Value *v);
+void value_release(Value **vp);
 
 #define value_is_err(v) (!v || v->kind == VAL_ERROR)
 

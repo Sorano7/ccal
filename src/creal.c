@@ -103,8 +103,8 @@ CR *cr_pow(CR *b, CR *x)
     CR *ln_b = cr_ln(b);
     CR *prod = cr_mul(x, ln_b);
     CR *n = cr_exp(prod);
-    cr_release(ln_b);
-    cr_release(prod);
+    cr_release(&ln_b);
+    cr_release(&prod);
     return n;
 }
 
@@ -113,8 +113,8 @@ CR *cr_log(CR *b, CR *x)
     CR *ln_x = cr_ln(x);
     CR *ln_b = cr_ln(b);
     CR *n = cr_div(ln_x, ln_b);
-    cr_release(ln_x);
-    cr_release(ln_b);
+    cr_release(&ln_x);
+    cr_release(&ln_b);
     return n;
 }
 
@@ -126,9 +126,10 @@ CR *cr_retain(CR *from)
 }
 
 // Free a CR node.
-void cr_release(CR *n)
+void cr_release(CR **np)
 {
-    if (!n) return;
+    if (!np || !*np) return;
+    CR *n = *np;
     if (--n->refcount > 0) return;
 
     if (n->kind == CR_LEAF_RATIONAL)
@@ -136,9 +137,10 @@ void cr_release(CR *n)
     if (n->has_cache)
         mpfi_clear(n->cached_interval);
 
-    cr_release(n->l);
-    cr_release(n->r);
+    cr_release(&n->l);
+    cr_release(&n->r);
     free(n);
+    *np = NULL;
 }
 
 static void cr_rational_eval(CR *n, mp_prec_t p, mpfi_t out)

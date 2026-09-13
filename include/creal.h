@@ -32,7 +32,7 @@ CR *cr_log(CR *b, CR *x);
 CR *cr_ln(CR *x);
 
 CR *cr_retain(CR *from);
-void cr_release(CR *n);
+void cr_release(CR **np);
 
 void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result);
 double cr_to_d(CR *n);

@@ -198,7 +198,7 @@ bool run_eval(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
     value_render(result, &s, ctx);
     fprintf(fdout, SV_FMT"\n", SV_ARG(SV(s)));
 
-    value_release(result);
+    value_release(&result);
     str_free(&s);
     return ok;
 }

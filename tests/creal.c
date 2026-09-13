@@ -22,12 +22,12 @@ TEST(creal_basic_arithmetics)
     CR *quot = cr_div(c1, c2);
     CLOSE(quot, 0.5);
 
-    cr_release(c1);
-    cr_release(c2);
-    cr_release(sum);
-    cr_release(diff);
-    cr_release(prod);
-    cr_release(quot);
+    cr_release(&c1);
+    cr_release(&c2);
+    cr_release(&sum);
+    cr_release(&diff);
+    cr_release(&prod);
+    cr_release(&quot);
 }
 
 TEST(creal_sqrt)
@@ -36,8 +36,8 @@ TEST(creal_sqrt)
     CR *root = cr_sqrt(c2);
     CLOSE(root, 1.4142135623730951);
 
-    cr_release(c2);
-    cr_release(root);
+    cr_release(&c2);
+    cr_release(&root);
 }
 
 TEST(creal_ln_exp)
@@ -51,10 +51,10 @@ TEST(creal_ln_exp)
     CR *ln_e = cr_ln(ce);
     CLOSE(ln_e, 1.0);
 
-    cr_release(ce);
-    cr_release(c1);
-    cr_release(exp1);
-    cr_release(ln_e);
+    cr_release(&ce);
+    cr_release(&c1);
+    cr_release(&exp1);
+    cr_release(&ln_e);
 }
 
 TEST(creal_pow_log)
@@ -69,9 +69,9 @@ TEST(creal_pow_log)
     CR *log = cr_log(c2, c8);
     CLOSE(log, 3.0);
 
-    cr_release(c2);
-    cr_release(c3);
-    cr_release(c8);
-    cr_release(pow);
-    cr_release(log);
+    cr_release(&c2);
+    cr_release(&c3);
+    cr_release(&c8);
+    cr_release(&pow);
+    cr_release(&log);
 }

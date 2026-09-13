@@ -16,7 +16,7 @@ void vm_reset(VM *v)
 {
     scope_release_r(v->scope);
     v->scope = scope_from(NULL);
-    if (v->last) value_release(v->last);
+    if (v->last) value_release(&v->last);
     v->last = NULL;
     v->base = BASE_DEFAULT;
 }
@@ -25,7 +25,7 @@ void vm_reset(VM *v)
 void vm_free(VM *v)
 {
     scope_release_r(v->scope);
-    if (v->last) value_release(v->last);
+    if (v->last) value_release(&v->last);
 }
 
 // Evaluate a number expression.
@@ -106,7 +106,7 @@ static Value *eval_prefix(VM *v, Expr *e)
             break;
     }
 
-    value_release(out);
+    value_release(&out);
     return value_errorf(e->span, "Invalid operation: '%s' %s", 
             op_to_str[e->as.prefix.op],
             vk_to_str[out->kind]);
@@ -190,14 +190,14 @@ static Value *eval_exact_infix(Value *l, Expr *e, Value *r)
         case OP_DIV:
             if (mpq_cmp_ui(r->as.exact, 0, 1) == 0)
             {
-                value_release(out);
+                value_release(&out);
                 return value_errorf(r->span, "Division by zero");
             }
             MPQ_INFIX(mpq_div, out, l, r);
             break;
 
         default:
-            value_release(out);
+            value_release(&out);
             return value_errorf(e->span, "Unknown operator");
     }
     return out;
@@ -283,7 +283,7 @@ static Value *eval_builtin_bool(Value *f, Value *arg)
 
 #define AS_REAL(val, cr) do { \
     switch ((val)->kind) { \
-        case VAL_REAL:  (cr) = (val)->as.real;    break; \
+        case VAL_REAL:  (cr) = cr_retain((val)->as.real);    break; \
         case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
         default:        return value_errorf((val)->span, "Invalid argument"); \
     } \
@@ -295,6 +295,7 @@ static Value *eval_builtin_real_unary(CRUnary fn, Value *arg)
     CR *x = NULL;
     AS_REAL(arg, x);
     Value *out = value_real(arg->span, fn(x));
+    cr_release(&x);
     return out;
 }
 
@@ -307,6 +308,8 @@ static Value *eval_builtin_real_binary(Value *f, CRBinary fn, Value *right)
     AS_REAL(left, l);
     AS_REAL(right, r);
     Value *out = value_real((Span){left->span.from, right->span.to}, fn(l, r));
+    cr_release(&l);
+    cr_release(&r);
     return out;
 }
 
@@ -344,7 +347,7 @@ static Value *eval_apply(VM *v, Expr *f, Expr *a)
     Value *arg = vm_eval_expr(v, a);
     if (value_is_err(arg))
     {
-        value_release(func);
+        value_release(&func);
         return arg;
     }
 
@@ -358,8 +361,8 @@ static Value *eval_apply(VM *v, Expr *f, Expr *a)
                           break;
     }
 
-    value_release(func);
-    value_release(arg);
+    value_release(&func);
+    value_release(&arg);
     return out;
 }
 
@@ -378,7 +381,7 @@ static Value *eval_infix(VM *v, Expr *e)
     Value *r = vm_eval_expr(v, e->as.infix.right);
     if (value_is_err(r))
     {
-        value_release(l);
+        value_release(&l);
         return r;
     }
 
@@ -396,8 +399,8 @@ static Value *eval_infix(VM *v, Expr *e)
     }
     else if (both_real || one_real)
     {
-        Value *lr = l;
-        Value *rr = r;
+        Value *lr = value_retain(l);
+        Value *rr = value_retain(r);
 
         if (l->kind == VAL_EXACT)
             lr = value_real(l->span, cr_from_mpq(l->as.exact));
@@ -407,9 +410,9 @@ static Value *eval_infix(VM *v, Expr *e)
         out = eval_real_infix(lr, e, rr);
 
         if (l->kind == VAL_EXACT)
-            value_release(lr);
+            value_release(&lr);
         if (l->kind == VAL_EXACT)
-            value_release(rr);
+            value_release(&rr);
     }
     else if (both_bool)
     {
@@ -421,8 +424,8 @@ static Value *eval_infix(VM *v, Expr *e)
                 vk_to_str[l->kind], op_to_str[e->as.infix.op], vk_to_str[r->kind]);
     }
 
-    value_release(l);
-    value_release(r);
+    value_release(&l);
+    value_release(&r);
     return out;
 }
 
@@ -481,7 +484,7 @@ static Value *eval_cond(VM *v, Expr *e)
 
     if (!value_is_bool(cond))
     {
-        value_release(cond);
+        value_release(&cond);
         return value_errorf(e->as.cond.if_->span, "Expected bool");
     }
 
@@ -489,7 +492,7 @@ static Value *eval_cond(VM *v, Expr *e)
         ? vm_eval_expr(v, e->as.cond.then)
         : vm_eval_expr(v, e->as.cond.else_);
 
-    value_release(cond);
+    value_release(&cond);
     return out;
 }
 
@@ -535,11 +538,11 @@ Value *vm_run(VM *v, StringView src)
         if (value_is_err(out))
             goto cleanup;
 
-        if (v->last) value_release(v->last);
+        if (v->last) value_release(&v->last);
         v->last = value_retain(out);
 
         if (i < m.len-1)
-            value_release(out);
+            value_release(&out);
     }
 
 cleanup:

@@ -142,7 +142,7 @@ typedef struct
 
 // Render a rational as a decimal string truncated up to max_digits.
 // Assumes base up to 62.
-void render_decimal(String *sb, const mpq_t n, int base, size_t max_digits)
+void render_mpq_as_decimal(String *sb, const mpq_t n, int base, size_t max_digits)
 {
     if (mpq_sgn(n) < 0)
         str_append(sb, "-");
@@ -239,7 +239,93 @@ void render_decimal(String *sb, const mpq_t n, int base, size_t max_digits)
     mpz_clears(num, den, intpart, rem, mul, digit, NULL);
 }
 
-void render_creal(String *sb, const mpfi_t n, int base, size_t max_digits)
+// Render a floating point number.
+static void render_mpfr(String *sb, const mpfr_t n, int base, size_t max_digits, mpfr_rnd_t rnd)
+{
+    if (mpfr_nan_p(n))
+    {
+        str_append(sb, "NaN");
+        return;
+    }
+
+    if (mpfr_inf_p(n))
+    {
+        str_append(sb, (mpfr_sgn(n) < 0) ? "-Inf" : "Inf");
+        return;
+    }
+
+    int sign = mpfr_signbit(n) ? -1 : 1;
+
+    if (mpfr_zero_p(n))
+    {
+        str_append(sb, (sign < 0) ? "-0" : "0");
+        return;
+    }
+
+    mpfr_exp_t exp;
+    char *tmp = mpfr_get_str(NULL, &exp, base, 1, n, rnd);
+    if (!tmp) return;
+    mpfr_free_str(tmp);
+
+    long ndigits = exp + max_digits;
+    if (ndigits < 1) ndigits = 1;
+
+    char *digits = mpfr_get_str(NULL, &exp, base, ndigits, n, rnd);
+    if (!digits) return;
+
+    long needed = exp + max_digits;
+    if (needed != ndigits)
+    {
+        mpfr_free_str(digits);
+        if (needed < 1) needed = 1;
+        digits = mpfr_get_str(NULL, &exp, base, needed, n, rnd);
+        if (!digits) return;
+    }
+
+    StringView d = SV(digits);
+
+    if (sign < 0)
+    {
+        sv_shift(&d, 1);
+        str_append(sb, "-");
+    }
+
+    if (exp <= 0)
+    {
+        str_append(sb, "0");
+    }
+    else
+    {
+        for (size_t i = 0; i < (size_t)exp; i++)
+            str_append(sb, (char)((i < d.len) ? d.data[i] : '0'));
+    }
+
+    if (max_digits > 0)
+    {
+        str_append(sb, ".");
+        size_t written = 0;
+
+        if (exp < 0)
+        {
+            size_t zeros = (size_t)(-exp);
+            if (zeros > max_digits) zeros = max_digits;
+            for (size_t i = 0; i < zeros; i++)
+            {
+                str_append(sb, "0");
+                written++;
+            }
+        }
+
+        size_t start = (exp > 0) ? (size_t)exp : 0;
+        for (size_t i = start; i < d.len && written < max_digits; i++, written++)
+            str_append(sb, d.data[i]);
+    }
+
+    mpfr_free_str(digits);
+}
+
+// Render a computable real as an interval.
+void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_digits)
 {
     mpfr_prec_t prec = mpfi_get_prec(n);
     mpfr_t lo, hi;
@@ -247,130 +333,19 @@ void render_creal(String *sb, const mpfi_t n, int base, size_t max_digits)
     mpfi_get_left(lo, n);
     mpfi_get_right(hi, n);
 
-    if (mpfr_nan_p(lo) || mpfr_nan_p(hi))
-    {
-        str_append(sb, "NaN");
-        goto done;
-    }
+    String sba, sbb;
+    str_init(&sba);
+    str_init(&sbb);
 
-    int slo = mpfr_sgn(lo);
-    int shi = mpfr_sgn(hi);
+    render_mpfr(&sba, lo, base, max_digits, MPFR_RNDD);
+    render_mpfr(&sbb, hi, base, max_digits, MPFR_RNDU);
 
-    if (mpfr_inf_p(lo) && mpfr_inf_p(hi) && slo == shi)
-    {
-        str_append(sb, slo < 0 ? "-Inf" : "Inf");
-        goto done;
-    }
+    if (sba.len == 0) str_append(&sba, "?");
+    if (sbb.len == 0) str_append(&sbb, "?");
 
-    if ((mpfr_inf_p(lo) || mpfr_inf_p(hi)) || (slo < 0 && shi > 0))
-    {
-        str_append(sb, "?");
-        goto done;
-    }
+    str_appendf(sb, "["SV_FMT", "SV_FMT"]", SV_ARG(SV(sba)), SV_ARG(SV(sbb)));
 
-    int neg = (slo < 0 || (slo == 0 && shi < 0));
-
-    mpfr_t a, b;
-    mpfr_inits2(prec, a, b, NULL);
-
-    if (neg)
-    {
-        mpfr_neg(a, hi, MPFR_RNDN);
-        mpfr_neg(b, lo, MPFR_RNDN);
-    }
-    else
-    {
-        mpfr_set(a, lo, MPFR_RNDN);
-        mpfr_set(b, hi, MPFR_RNDN);
-    }
-
-    bool point = mpfr_equal_p(a, b);
-    char *a_str = NULL, *b_str = NULL;
-    mpfr_exp_t exp_a = 0, exp_b = 0;
-
-    if (point)
-    {
-        a_str = mpfr_get_str(NULL, &exp_a, base, max_digits, a, MPFR_RNDN);
-        b_str = a_str;
-        exp_b = exp_a;
-    }
-    else
-    {
-        size_t req = max_digits + 2;
-        a_str = mpfr_get_str(NULL, &exp_a, base, req, a, MPFR_RNDD);
-        b_str = mpfr_get_str(NULL, &exp_b, base, req, b, MPFR_RNDU);
-    }
-
-    if ((!a_str || !b_str) || (exp_a != exp_b))
-    {
-        str_append(sb, "?");
-        goto cleanup;
-    }
-
-    if (a_str[0] == '0')
-    {
-        str_append(sb, "0");
-        goto cleanup;
-    }
-
-    if (neg) str_append(sb, "-");
-    StringView as = SV(a_str);
-    StringView bs = SV(b_str);
-
-    size_t avail = as.len < bs.len ? as.len : bs.len;
-
-    size_t agree = 0;
-    while (agree < avail && as.data[agree] == bs.data[agree]) agree++;
-    size_t shown = agree < max_digits ? agree : max_digits;
-    bool truncated = (shown < agree) || (agree < avail);
-
-    if (shown == 0)
-    {
-        str_append(sb, "?");
-        goto cleanup;
-    }
-
-    size_t sig =shown;
-    while (sig > 1 && as.data[sig-1] == '0') sig--;
-
-    bool scientific = exp_a > 0 && (size_t)exp_a > sig;
-
-    if (scientific)
-    {
-        str_append(sb, as.data[0]);
-        if (sig > 1)
-        {
-            str_append(sb, ".");
-            str_append(sb, sv_slice(as, .from=1, .to=sig));
-        }
-        if (truncated) str_append(sb, "...");
-        if (exp_a - 1 != 0)
-            str_appendf(sb, "e%+ld", (long)(exp_a - 1));
-    }
-    else if (exp_a <= 0)
-    {
-        str_append(sb, "0.");
-        for (mpfr_exp_t z = 0; z < -exp_a; z++)
-            str_append(sb, "0");
-        str_append(sb, sv_slice(as, .from=0, .to=sig));
-        if (truncated) str_append(sb, "...");
-    }
-    else
-    {
-        str_append(sb, sv_slice(as, .from=0, .to=(size_t)exp_a));
-        if ((size_t)exp_a < sig)
-        {
-            str_append(sb, ".");
-            str_append(sb, sv_slice(as, .from=(size_t)exp_a, .to=sig));
-        }
-        if (truncated) str_append(sb, "...");
-    }
-
-cleanup:
-    if (a_str) mpfr_free_str(a_str);
-    if (b_str && b_str != a_str) mpfr_free_str(b_str);
-    mpfr_clears(a, b, NULL);
-
-done:
+    str_free(&sba);
+    str_free(&sbb);
     mpfr_clears(lo, hi, NULL);
 }

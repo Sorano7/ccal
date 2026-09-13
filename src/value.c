@@ -131,8 +131,10 @@ Value *value_clone(const Value *from)
     return v;
 }
 
-void value_release(Value *v)
+void value_release(Value **vp)
 {
+    if (!vp || !*vp) return;
+    Value *v = *vp;
     if (!v || --v->refcount > 0) return;
 
     switch (v->kind)
@@ -142,7 +144,7 @@ void value_release(Value *v)
             break;
 
         case VAL_REAL:
-            cr_release(v->as.real);
+            cr_release(&v->as.real);
             break;
 
         case VAL_ERROR:
@@ -165,6 +167,7 @@ void value_release(Value *v)
             UNREACHABLE();
     }
     free(v);
+    *vp = NULL;
 }
 
 // Checks if a value is a bool value.
@@ -229,7 +232,7 @@ void scope_release(Scope *s)
         Symbol sym = da_at(s, i);
         str_free(sym.id);
         free(sym.id);
-        value_release(sym.value);
+        value_release(&sym.value);
     }
     da_free(s);
     free(s);
@@ -267,7 +270,7 @@ void scope_set_symbol(Scope *scope, StringView id, Value *value)
         Symbol *existing = &da_at(scope, i);
         if (sv_equal(existing->id, id))
         {
-            value_release(existing->value);
+            value_release(&existing->value);
             existing->value = new_value;
             return;
         }
@@ -319,7 +322,7 @@ static void value_render_exact(Value *v, String *sb, RenderCtx *ctx)
     switch (ctx->num_form)
     {
         case NUMBER_DECIMAL:
-            render_decimal(sb, v->as.exact, ctx->base, ctx->max_digits);
+            render_mpq_as_decimal(sb, v->as.exact, ctx->base, ctx->max_digits);
             break;
 
         case NUMBER_RATIONAL:
@@ -429,7 +432,7 @@ static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, Ren
 
             value_render(existing, sb, ctx);
             if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-            value_release(existing);
+            value_release(&existing);
             break;
 
         case EXPR_PREFIX:
@@ -478,7 +481,7 @@ static void value_render_real(Value *v, String *sb, RenderCtx *ctx)
     mpfi_init2(result, ctx->prec);
     cr_eval(v->as.real, ctx->prec, result);
 
-    render_creal(sb, result, ctx->base, ctx->max_digits);
+    render_mpfi_as_interval(sb, result, ctx->base, ctx->max_digits);
     mpfi_clear(result);
 
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);

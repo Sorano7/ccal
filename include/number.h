@@ -49,7 +49,7 @@ void literal_init(Literal *lit);
 void literal_free(Literal *lit);
 void literal_to_mpq(Literal *lit, unsigned long base, mpq_t out);
 
-void render_decimal(String *sb, const mpq_t n, int base, size_t max_digits);
-void render_creal(String *sb, const mpfi_t n, int base, size_t max_digits);
+void render_mpq_as_decimal(String *sb, const mpq_t n, int base, size_t max_digits);
+void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_digits);
 
 #endif

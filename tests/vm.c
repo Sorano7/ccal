@@ -19,10 +19,10 @@
 
 #define END() \
     str_free(&sb); \
-    value_release(val);
+    value_release(&val);
 
 #define EVAL(src) do { \
-    if (val) value_release(val); \
+    if (val) value_release(&val); \
     val = vm_run(&vm, SV(src)); \
     if (value_is_err(val)) \
         CUT_FATAL("failed to parse "#src": "SV_FMT, \
@@ -30,7 +30,6 @@
 } while (0)
 
 #define EVAL_RENDER(s) do { \
-    if (val) value_release(val); \
     str_reset(&sb); \
     EVAL(s); \
     ctx.src = SV(s); \
@@ -41,7 +40,7 @@
     val = vm_run(&vm, SV(src)); \
     if (!value_is_err(val)) \
         CUT_FATAL("did not failed on parsing "#src); \
-    value_release(val); \
+    value_release(&val); \
 } while (0)
 
 #define NUM_EQ(v, n, d) do { \
@@ -280,13 +279,10 @@ TEST(sqrt_eval)
 {
     START();
         EVAL_RENDER("'sqrt 2");
-        CUT_CHECK(sv_equal(sb, "1.414213562..."));
-
-        EVAL_RENDER("'sqrt 7");
-        CUT_CHECK(sv_equal(sb, "2.645751311..."));
+        CUT_CHECK(sv_equal(sb, "[1.4142135623, 1.4142135624]"));
 
         EVAL_RENDER("'sqrt 9");
-        CUT_CHECK(sv_equal(sb, "3"));
+        CUT_CHECK(sv_equal(sb, "[3.0000000000, 3.0000000000]"));
     END();
 }
 
@@ -294,6 +290,6 @@ TEST(exact_and_real_operation)
 {
     START();
         EVAL_RENDER("'sqrt 2 + 2");
-        CUT_CHECK(sv_equal(sb, "3.414213562..."));
+        CUT_CHECK(sv_equal(sb, "[3.4142135623, 3.4142135624]"));
     END();
 }

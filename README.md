@@ -14,18 +14,18 @@ cc cut.c -o cut && ./cut build ccal
 ```
 ccal help                 --  show help
 ccal <opts>               --  start interactive REPL
-ccal eval <expr> <opts>   --  evaluate an expression
+ccal eval <opts> <expr>   --  evaluate an expression
 ```
 
 Options include:
 
 ```
--d | --decimal
--r | --rational
--o | --obase     <n>
--i | --ibase     <n>
--t | --truncate  <n>
--p | --precision <n>
+-o | --obase     <n>      -- set output base
+-i | --ibase     <n>      -- set input base
+-t | --truncate  <n>      -- max decimal places
+-p | --precision <n>      -- precision for real values
+-f | --format    <fmt>    -- display format for real values
+-r | --rational           -- show rational form for exact values
 ```
 
 Similar commands are available in REPL, prefixed with `:`.

@@ -107,7 +107,7 @@ static Value *eval_prefix(VM *v, Expr *e)
     }
 
     value_release(&out);
-    return value_errorf(e->span, "Invalid operation: '%s' %s", 
+    return value_errorf(e->span, "Undefined operation: '%s' %s", 
             op_to_str[e->as.prefix.op],
             vk_to_str[out->kind]);
 }
@@ -213,7 +213,9 @@ static Value *eval_real_infix(Value *l, Expr *e, Value *r)
         case OP_SUB: n = cr_sub(l->as.real, r->as.real); break;
         case OP_MUL: n = cr_mul(l->as.real, r->as.real); break;
         case OP_DIV: n = cr_div(l->as.real, r->as.real); break;
-        default:     return value_errorf(e->span, "Unknown operator");
+
+        default:     return value_errorf(e->span, "Undefined operation: "
+                             "real '%s' real", op_to_str[e->as.infix.op]);
     }
     return value_real(e->span, n);
 }
@@ -285,7 +287,7 @@ static Value *eval_builtin_bool(Value *f, Value *arg)
     switch ((val)->kind) { \
         case VAL_REAL:  (cr) = cr_retain((val)->as.real);    break; \
         case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
-        default:        return value_errorf((val)->span, "Invalid argument"); \
+        default:        return value_errorf((val)->span, "Expected number"); \
     } \
 } while (0)
 
@@ -357,8 +359,7 @@ static Value *eval_apply(VM *v, Expr *f, Expr *a)
     {
         case VAL_LAMBDA:  out = eval_lambda_apply(v, func, arg);  break;
         case VAL_BUILTIN: out = eval_builtin_apply(func, arg);    break;
-        default:          out = value_errorf(f->span, "Invalid application of %s", vk_to_str[func->kind]);
-                          break;
+        default:          out = value_errorf(f->span, "Expected lambda"); break;
     }
 
     value_release(&func);
@@ -420,7 +421,7 @@ static Value *eval_infix(VM *v, Expr *e)
     }
     else
     {
-        out = value_errorf(e->span, "Invalid operation: %s '%s' %s",
+        out = value_errorf(e->span, "Undefined operation: %s '%s' %s",
                 vk_to_str[l->kind], op_to_str[e->as.infix.op], vk_to_str[r->kind]);
     }
 

@@ -556,9 +556,17 @@ cleanup:
 void vm_env_render(VM *v, String *sb, RenderCtx *ctx)
 {
     Scope *scope = v->scope;
+
     if (ctx->use_color) str_appendf(sb, ACOLOR_CYAN);
     str_appendf(sb, "Env (%zu)\n", scope->len);
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+
+    if (v->last)
+    {
+        str_append(sb, "    ans = ");
+        value_render(v->last, sb, ctx);
+        str_append(sb, "\n");
+    }
 
     DA_FOR(v->scope, i)
     {
@@ -567,5 +575,6 @@ void vm_env_render(VM *v, String *sb, RenderCtx *ctx)
         value_render(sym.value, sb, ctx);
         str_append(sb, "\n");
     }
+
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 }

@@ -48,9 +48,9 @@ There are two ways to spell a sequence of digits, and a number must only contain
 Examples:
 
 ```
-12#1A3    == 12#[1, 10, 3]   == 267
-16#a.a    == 16#[10].[10]    == 10.625
-1_000.(3) == [1,0,0,0].([3]) == 3001/3
+12#1A3    -- 12#[1, 10, 3]   -- 267
+16#a.a    -- 16#[10].[10]    -- 10.625
+1_000.(3) -- [1,0,0,0].([3]) -- 3001/3
 ```
 
 The base annotation scopes to a single expression.
@@ -77,7 +77,7 @@ Defined as `<param> : <body>`.
 
 ```
 'x: 'x + 1       -- fn (x) x + 1
-'x: 'y: 'x 'y    -- fn (x) fn (y) x + y
+'x: 'y: 'x + 'y  -- fn (x) (fn (y) x + y)
 ```
 
 Three ways of application:

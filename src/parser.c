@@ -338,7 +338,7 @@ static Expr *parse_neg(Parser *p)
     CONSUME_EXPECT(p, TOK_MINUS);
 
     if (!is_sexpr(p))
-            return expr_err(tspan(p), "Expected number of group");
+        return expr_err(tspan(p), "Expected number or group");
 
     Expr *e = parse_expr(p, PREC_PREFIX);
     if (is_error(e)) return e;

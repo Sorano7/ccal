@@ -1461,6 +1461,9 @@ int cut_build_run(int argc, char **argv)
             {
                 str_reset(&cmd);
                 generate_run_command(unit->name, cut_builder.build_dir, &cmd);
+                for (int i = 3; i < argc; i++)
+                    str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(args[i]));
+
                 exec_command(SV(cmd));
             }
             return 0;

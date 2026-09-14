@@ -31,6 +31,7 @@
 \
     X(TOK_EQ,        "==") \
     X(TOK_NEQ,       "!=") \
+    X(TOK_APPROX,    "~=") \
 \
     X(TOK_DOT,       ".") \
     X(TOK_COMMA,     ",") \

@@ -1,6 +1,7 @@
 #include "creal.h"
 #include "cut.h"
 #include <stdlib.h>
+#include <math.h>
 
 #define GUARD_BITS 32
 #define MAX_PREC_BITS (1u << 20)
@@ -264,4 +265,11 @@ double cr_to_d(CR *n)
     double d = mpfi_get_d(out);
     mpfi_clear(out);
     return d;
+}
+
+bool cr_approx(CR *a, CR *b)
+{
+    double da = cr_to_d(a);
+    double db = cr_to_d(b);
+    return fabs(da - db) <= 1e-12;
 }

@@ -37,4 +37,6 @@ void cr_release(CR **np);
 void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result);
 double cr_to_d(CR *n);
 
+bool cr_approx(CR *a, CR *b);
+
 #endif

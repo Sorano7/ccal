@@ -23,6 +23,7 @@ typedef struct
 \
     X(OP_EQ ,    "==") \
     X(OP_NEQ,    "!=") \
+    X(OP_APPROX, "~=") \
 \
     X(OP_LT ,    "<") \
     X(OP_LEQ,    "<=") \

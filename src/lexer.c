@@ -8,6 +8,7 @@ Operator token_to_op(Token t)
     {
         case TOK_EQ:     return OP_EQ;
         case TOK_NEQ:    return OP_NEQ;
+        case TOK_APPROX: return OP_APPROX;
 
         case TOK_LT:     return OP_LT;
         case TOK_LEQ:    return OP_LEQ;
@@ -78,6 +79,9 @@ static TokenKind token_kind_get(StringView src)
         case '!':
             if (next != '=') break;
             return TOK_NEQ;
+        case '~':
+            if (next != '=') break;
+            return TOK_APPROX;
 
         case '<':
         case '>':
@@ -99,6 +103,7 @@ static size_t token_len(TokenKind kind)
     {
         case TOK_EQ:
         case TOK_NEQ:
+        case TOK_APPROX:
         case TOK_LEQ:
         case TOK_GEQ:
             return 2;

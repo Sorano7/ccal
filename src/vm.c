@@ -167,6 +167,7 @@ static bool op_is_cmp_or_eq(Operator op)
         case OP_GEQ:
         case OP_EQ:
         case OP_NEQ:
+        case OP_APPROX:
             return true;
         default:
             return false;
@@ -204,9 +205,24 @@ static Value *eval_exact_infix(const Value *l, const Expr *e, const Value *r)
     return out;
 }
 
+// Evaluate comparison or equality between two real numbers.
+static Value *eval_real_bool_infix(const Value *l, const Expr *e, const Value *r)
+{
+    bool b;
+    switch (e->as.infix.op)
+    {
+        case OP_APPROX: b = cr_approx(l->as.real, r->as.real); break;
+        default:        return value_error_undefined_op(l, e, r);
+    }
+    return value_bool(e->span, b);
+}
+
 // Evaluate infix between two real numbers.
 static Value *eval_real_infix(const Value *l, const Expr *e, const Value *r)
 {
+    if (op_is_cmp_or_eq(e->as.infix.op))
+        return eval_real_bool_infix(l, e, r);
+
     CR *n = NULL;
     switch (e->as.infix.op)
     {

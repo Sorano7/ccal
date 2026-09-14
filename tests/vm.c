@@ -1,5 +1,6 @@
 #include "vm.h"
 #include <gmp.h>
+#include <math.h>
 
 #include "cut.h"
 
@@ -50,6 +51,13 @@
         CUT_ERROR("expected %d/%d, found %s", n, d, s); \
         free(s); \
     } \
+} while (0)
+
+#define REAL_CLOSE(v, d) do { \
+    CUT_MUST((v)->kind == VAL_REAL); \
+    double got = cr_to_d((v)->as.real); \
+    if (fabs(got - (d)) > 1e-12) \
+        CUT_ERROR("expected %.10g, found %.10g", (d), got); \
 } while (0)
 
 #define BOOL_EQ(v, b) do { \
@@ -272,5 +280,32 @@ TEST(infix_application)
         EVAL("'div = 'x: 'y: 'x / 'y");
         EVAL("1 `div` 2");
         NUM_EQ(val, 1, 2);
+    END();
+}
+
+TEST(exact_converts_to_real_when_involved)
+{
+    START();
+        EVAL("'sqrt 4 * 2");
+        REAL_CLOSE(val, 4.0);
+    END();
+}
+
+TEST(real_approximation)
+{
+    START();
+        EVAL("'pi ~= 'pi");
+        BOOL_EQ(val, true);
+
+        EVAL("'ln 'e ~= 2");
+        BOOL_EQ(val, false);
+    END();
+}
+
+TEST(real_render_correct)
+{
+    START();
+        EVAL_RENDER("'pow 2 3");
+        CUT_CHECK(sv_equal(sb, "~= 8.0000000000"));
     END();
 }

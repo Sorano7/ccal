@@ -36,6 +36,7 @@ static OpPrec token_prec(Token t)
 
         case TOK_EQ:
         case TOK_NEQ:
+        case TOK_APPROX:
             return PREC_EQUALITY;
 
         case TOK_LT:
@@ -74,6 +75,7 @@ static bool is_right_associative(Operator op)
     {
         case OP_EQ:
         case OP_NEQ:
+        case OP_APPROX:
         case OP_LT:
         case OP_LEQ:
         case OP_GT:

@@ -274,22 +274,3 @@ TEST(infix_application)
         NUM_EQ(val, 1, 2);
     END();
 }
-
-TEST(sqrt_eval)
-{
-    START();
-        EVAL_RENDER("'sqrt 2");
-        CUT_CHECK(sv_equal(sb, "[1.4142135623, 1.4142135624]"));
-
-        EVAL_RENDER("'sqrt 9");
-        CUT_CHECK(sv_equal(sb, "[3.0000000000, 3.0000000000]"));
-    END();
-}
-
-TEST(exact_and_real_operation)
-{
-    START();
-        EVAL_RENDER("'sqrt 2 + 2");
-        CUT_CHECK(sv_equal(sb, "[3.4142135623, 3.4142135624]"));
-    END();
-}

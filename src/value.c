@@ -475,16 +475,20 @@ static void value_render_lambda(Value *v, String *sb, RenderCtx *ctx)
 // Compute and render a real value.
 static void value_render_real(Value *v, String *sb, RenderCtx *ctx)
 {
-    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
 
     mpfi_t result;
     mpfi_init2(result, ctx->prec);
     cr_eval(v->as.real, ctx->prec, result);
 
-    render_mpfi_as_interval(sb, result, ctx->base, ctx->max_digits);
-    mpfi_clear(result);
-
+    if (ctx->use_color) str_appendf(sb, AFMT_DIM);
+    str_append(sb, "~= ");
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+
+    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+    render_mpfi_as_interval(sb, result, ctx->base, ctx->max_digits);
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+
+    mpfi_clear(result);
 }
 
 // Render a value to the string builder.

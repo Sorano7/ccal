@@ -239,6 +239,63 @@ void render_mpq_as_decimal(String *sb, const mpq_t n, int base, size_t max_digit
     mpz_clears(num, den, intpart, rem, mul, digit, NULL);
 }
 
+static void render_mpfr_sci(String *sb, StringView d, mpfr_exp_t exp, size_t max_digits)
+{
+    str_append(sb, (char)((d.len > 0) ? d.data[0] : '0'));
+
+    if (max_digits > 0)
+    {
+        str_append(sb, ".");
+        size_t written = 0;
+
+        for (size_t i = 1; i < d.len && written < max_digits; i++, written++)
+            str_append(sb, d.data[i]);
+
+        while (written < max_digits)
+        {
+            str_append(sb, "0");
+            written++;
+        }
+    }
+
+    str_append(sb, "e");
+    str_appendf(sb, "%+ld", exp-1);
+}
+
+static void render_mpfr_fixed(String *sb, StringView d, mpfr_exp_t exp, size_t max_digits)
+{
+    if (exp <= 0)
+    {
+        str_append(sb, "0");
+    }
+    else
+    {
+        for (size_t i = 0; i < (size_t)exp; i++)
+            str_append(sb, (char)((i < d.len) ? d.data[i] : '0'));
+    }
+
+    if (max_digits > 0)
+    {
+        str_append(sb, ".");
+        size_t written = 0;
+
+        if (exp < 0)
+        {
+            size_t zeros = (size_t)(-exp);
+            if (zeros > max_digits) zeros = max_digits;
+            for (size_t i = 0; i < zeros; i++)
+            {
+                str_append(sb, "0");
+                written++;
+            }
+        }
+
+        size_t start = (exp > 0) ? (size_t)exp : 0;
+        for (size_t i = start; i < d.len && written < max_digits; i++, written++)
+            str_append(sb, d.data[i]);
+    }
+}
+
 // Render a floating point number.
 static void render_mpfr(String *sb, const mpfr_t n, int base, size_t max_digits, mpfr_rnd_t rnd)
 {
@@ -284,42 +341,16 @@ static void render_mpfr(String *sb, const mpfr_t n, int base, size_t max_digits,
 
     StringView d = SV(digits);
 
-    if (sign < 0)
+    if (sign < 0) 
     {
         sv_shift(&d, 1);
         str_append(sb, "-");
     }
 
-    if (exp <= 0)
-    {
-        str_append(sb, "0");
-    }
+    if (exp > 6 || exp <= -6)
+        render_mpfr_sci(sb, d, exp, max_digits);
     else
-    {
-        for (size_t i = 0; i < (size_t)exp; i++)
-            str_append(sb, (char)((i < d.len) ? d.data[i] : '0'));
-    }
-
-    if (max_digits > 0)
-    {
-        str_append(sb, ".");
-        size_t written = 0;
-
-        if (exp < 0)
-        {
-            size_t zeros = (size_t)(-exp);
-            if (zeros > max_digits) zeros = max_digits;
-            for (size_t i = 0; i < zeros; i++)
-            {
-                str_append(sb, "0");
-                written++;
-            }
-        }
-
-        size_t start = (exp > 0) ? (size_t)exp : 0;
-        for (size_t i = start; i < d.len && written < max_digits; i++, written++)
-            str_append(sb, d.data[i]);
-    }
+        render_mpfr_fixed(sb, d, exp, max_digits);
 
     mpfr_free_str(digits);
 }
@@ -337,13 +368,25 @@ void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_di
     str_init(&sba);
     str_init(&sbb);
 
-    render_mpfr(&sba, lo, base, max_digits, MPFR_RNDD);
-    render_mpfr(&sbb, hi, base, max_digits, MPFR_RNDU);
-
-    if (sba.len == 0) str_append(&sba, "?");
-    if (sbb.len == 0) str_append(&sbb, "?");
-
-    str_appendf(sb, "["SV_FMT", "SV_FMT"]", SV_ARG(SV(sba)), SV_ARG(SV(sbb)));
+    render_mpfr(&sba, lo, base, max_digits, MPFR_RNDN);
+    render_mpfr(&sbb, hi, base, max_digits, MPFR_RNDN);
+    if (sba.len == 0 || sbb.len == 0)
+    {
+        str_append(sb, "?");
+    }
+    else if (sv_equal(sba, sbb))
+    {
+        str_appendf(sb, SV_FMT, SV_ARG(SV(sba)));
+    }
+    else
+    {
+        size_t len = sba.len < sbb.len ? sba.len : sbb.len;
+        for (size_t i = 0; i < len; i++)
+        {
+            if (sba.data[i] != sbb.data[i]) break;
+            str_append(sb, (char)sba.data[i]);
+        }
+    }
 
     str_free(&sba);
     str_free(&sbb);

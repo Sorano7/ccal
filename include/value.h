@@ -104,8 +104,13 @@ Value *value_real(Span span, CR *n);
 Value *value_bool(Span span, bool b);
 Value *value_builtin(Span span, BuiltinKind kind, size_t arity);
 Value *value_lambda(Expr *e, Scope *s);
+
 Value *value_errorf(Span span, const char *fmt, ...);
 Value *value_error_from_expr(const Expr *e);
+Value *value_error_undefined_op(const Value *l, const Expr *e, const Value *r);
+Value *value_error_expr_kind(const Expr *got, ExprKind want);
+Value *value_error_value_kind(const Value *got, ValueKind want);
+Value *value_error_value_kind_s(const Value *got, StringView want);
 
 Value *value_retain(Value *from);
 Value *value_clone(const Value *from);

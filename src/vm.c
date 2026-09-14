@@ -67,7 +67,8 @@ static Value *eval_ident(VM *v, Expr *e)
         return eval_builtin(v, e, builtin);
 
     Value *out = scope_get_symbol(v->scope, SV(e->as.id));
-    return out ? out : value_errorf(e->span, "undefined symbol");
+    out->span = e->span;
+    return out ? out : value_errorf(e->span, "Undefined symbol");
 }
 
 // Evaluate a prefix expression.
@@ -106,10 +107,9 @@ static Value *eval_prefix(VM *v, Expr *e)
             break;
     }
 
+    Value *err = value_error_undefined_op(NULL, e, out);
     value_release(&out);
-    return value_errorf(e->span, "Undefined operation: '%s' %s", 
-            op_to_str[e->as.prefix.op],
-            vk_to_str[out->kind]);
+    return err;
 }
 
 // Perform an mpq infix operation on two numbers wrapped in value.
@@ -122,10 +122,10 @@ static Value *eval_prefix(VM *v, Expr *e)
 static Value *eval_number_power(Value *l, Value *r)
 {
     if (mpz_cmp_ui(mpq_denref(r->as.exact), 1) != 0)
-        return value_errorf(r->span, "Non-integer exponent is not supported");
+        return value_errorf(r->span, "Use <'pow> for non-integer exponents");
 
     if (!mpz_fits_ulong_p(mpq_numref(r->as.exact)))
-        return value_errorf(r->span, "Exponent too large");
+        return value_errorf(r->span, "Use <'pow> for large exponents");
 
     Span s = {l->span.from, r->span.to};
     Value *out = value_exact(s, l->as.exact);
@@ -198,7 +198,7 @@ static Value *eval_exact_infix(Value *l, Expr *e, Value *r)
 
         default:
             value_release(&out);
-            return value_errorf(e->span, "Unknown operator");
+            return value_error_undefined_op(l, e, r);
     }
     return out;
 }
@@ -214,8 +214,7 @@ static Value *eval_real_infix(Value *l, Expr *e, Value *r)
         case OP_MUL: n = cr_mul(l->as.real, r->as.real); break;
         case OP_DIV: n = cr_div(l->as.real, r->as.real); break;
 
-        default:     return value_errorf(e->span, "Undefined operation: "
-                             "real '%s' real", op_to_str[e->as.infix.op]);
+        default:     return value_error_undefined_op(l, e, r);
     }
     return value_real(e->span, n);
 }
@@ -231,7 +230,7 @@ static Value *eval_bool_infix(Value *l, Expr *e, Value *r)
     {
         case OP_EQ:  vb = lb == rb; break;
         case OP_NEQ: vb = lb != rb; break;
-        default:     return value_errorf(e->span, "Unknown operator");
+        default:     return value_error_undefined_op(l, e, r);
     }
     return value_bool(e->span, vb);
 }
@@ -241,7 +240,7 @@ static Value *eval_assign_infix(VM *v, Expr *e)
 {
     Expr *l = e->as.infix.left;
     if (l->kind != EXPR_IDENT)
-        return value_errorf(l->span, "Expected identifier");
+        return value_error_expr_kind(l, EXPR_IDENT);
 
     BuiltinKind builtin = builtin_kind(l);
     if (builtin != BUILTIN_NONE && builtin != BUILTIN_HOLE)
@@ -270,6 +269,7 @@ static Value *eval_lambda_apply(VM *v, Value *f, Value *arg)
     if (func->as.lambda.param->kind == EXPR_IDENT)
         scope_set_symbol(v->scope, SV(func->as.lambda.param->as.id), arg);
     Value *out = vm_eval_expr(v, func->as.lambda.body);
+    out->span = (Span){f->span.from, arg->span.to};
 
     v->scope = prev;
     scope_release(s);
@@ -287,7 +287,7 @@ static Value *eval_builtin_bool(Value *f, Value *arg)
     switch ((val)->kind) { \
         case VAL_REAL:  (cr) = cr_retain((val)->as.real);    break; \
         case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
-        default:        return value_errorf((val)->span, "Expected number"); \
+        default:        return value_error_value_kind_s(val, SV("number")); break; \
     } \
 } while (0)
 
@@ -334,7 +334,7 @@ static Value *eval_builtin_apply(Value *f, Value *arg)
         case BUILTIN_POW:   return eval_builtin_real_binary(f, cr_pow, arg);
         case BUILTIN_LOG:   return eval_builtin_real_binary(f, cr_log, arg);
 
-        case BUILTIN_HOLE:  return value_errorf(f->span, "Expected lambda");
+        case BUILTIN_HOLE:  return value_error_value_kind_s(f, SV("lambda"));
         case BUILTIN_ANS:
         default:            UNREACHABLE();
     }
@@ -359,7 +359,7 @@ static Value *eval_apply(VM *v, Expr *f, Expr *a)
     {
         case VAL_LAMBDA:  out = eval_lambda_apply(v, func, arg);  break;
         case VAL_BUILTIN: out = eval_builtin_apply(func, arg);    break;
-        default:          out = value_errorf(f->span, "Expected lambda"); break;
+        default:          out = value_error_value_kind(func, VAL_LAMBDA); break;
     }
 
     value_release(&func);
@@ -421,8 +421,7 @@ static Value *eval_infix(VM *v, Expr *e)
     }
     else
     {
-        out = value_errorf(e->span, "Undefined operation: %s '%s' %s",
-                vk_to_str[l->kind], op_to_str[e->as.infix.op], vk_to_str[r->kind]);
+        out = value_error_undefined_op(l, e, r);
     }
 
     value_release(&l);
@@ -485,8 +484,9 @@ static Value *eval_cond(VM *v, Expr *e)
 
     if (!value_is_bool(cond))
     {
+        Value *err =  value_error_value_kind_s(cond, SV("bool"));
         value_release(&cond);
-        return value_errorf(e->as.cond.if_->span, "Expected bool");
+        return err;
     }
 
     Value *out = value_to_bool(cond)
@@ -515,6 +515,7 @@ Value *vm_eval_expr(VM *v, Expr *e)
         case EXPR_COND:   out = eval_cond(v, e);   break;
         default:          UNREACHABLE();
     }
+    DEV_MUST(out);
     return out;
 }
 

@@ -84,6 +84,34 @@ Value *value_error_from_expr(const Expr *e)
     return v;
 }
 
+Value *value_error_undefined_op(const Value *l, const Expr *e, const Value *r)
+{
+    if (e->kind == EXPR_PREFIX)
+        return value_errorf(e->span, "Undefined operation: '%s' <%s>",
+                op_to_str[e->as.prefix.op], vk_to_str[r->kind]);
+
+    return value_errorf(e->span, "Undefined operation: <%s> '%s' <%s>",
+            vk_to_str[l->kind], op_to_str[e->as.infix.op], vk_to_str[r->kind]);
+}
+
+Value *value_error_expr_kind(const Expr *got, ExprKind want)
+{
+    return value_errorf(got->span, "Expected <%s>, got <%s>", 
+            expr_to_str[want], expr_to_str[got->kind]);
+}
+
+Value *value_error_value_kind(const Value *got, ValueKind want)
+{
+    return value_errorf(got->span, "Expected <%s>, got <%s>", 
+            vk_to_str[want], vk_to_str[got->kind]);
+}
+
+Value *value_error_value_kind_s(const Value *got, StringView want)
+{
+    return value_errorf(got->span, "Expected <"SV_FMT">, got <%s>", 
+            SV_ARG(want), vk_to_str[got->kind]);
+}
+
 Value *value_retain(Value *from)
 {
     if (from) from->refcount++;

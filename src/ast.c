@@ -3,6 +3,15 @@
 #include <assert.h>
 
 const char *op_to_str[] = {OPS(AS_STR)};
+const char *expr_to_str[] = {
+    [EXPR_ERROR]  = "error",
+    [EXPR_NUMBER] = "number literal",
+    [EXPR_IDENT]  = "identifier",
+    [EXPR_LAMBDA] = "lambda literal",
+    [EXPR_INFIX]  = "infix",
+    [EXPR_PREFIX] = "prefix",
+    [EXPR_COND]   = "conditional",
+};
 
 // Allocate an expression with kind and span.
 static Expr *expr_new(ExprKind kind, Span span)

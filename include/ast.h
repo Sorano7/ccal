@@ -57,6 +57,8 @@ typedef enum
     EXPR_COND,
 } ExprKind;
 
+extern const char *expr_to_str[];
+
 typedef struct Expr
 {
     union

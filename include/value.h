@@ -4,6 +4,7 @@
 #include "cut.h"
 #include "ast.h"
 #include "creal.h"
+#include "number.h"
 #include <gmp.h>
 
 // Kinds of a value.
@@ -129,13 +130,6 @@ Scope *scope_from(Scope *parent);
 
 void scope_set_symbol(Scope *scope, StringView id, Value *value);
 Value *scope_get_symbol(Scope *scope, StringView id);
-
-typedef enum
-{
-    FMT_AUTO,
-    FMT_FIXED,
-    FMT_SCI,
-} OutputFormat;
 
 typedef struct
 {

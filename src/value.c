@@ -513,7 +513,7 @@ static void value_render_real(Value *v, String *sb, RenderCtx *ctx)
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 
     if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-    render_mpfi_as_interval(sb, result, ctx->base, ctx->max_digits);
+    render_mpfi_as_interval(sb, result, ctx->base, ctx->max_digits, ctx->fmt);
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
 
     mpfi_clear(result);

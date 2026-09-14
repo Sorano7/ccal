@@ -239,7 +239,7 @@ void render_mpq_as_decimal(String *sb, const mpq_t n, int base, size_t max_digit
     mpz_clears(num, den, intpart, rem, mul, digit, NULL);
 }
 
-static void render_mpfr_sci(String *sb, StringView d, mpfr_exp_t exp, size_t max_digits)
+static void render_mpfr_sci(String *sb, String *sexp, StringView d, mpfr_exp_t exp, size_t max_digits)
 {
     str_append(sb, (char)((d.len > 0) ? d.data[0] : '0'));
 
@@ -258,8 +258,8 @@ static void render_mpfr_sci(String *sb, StringView d, mpfr_exp_t exp, size_t max
         }
     }
 
-    str_append(sb, "e");
-    str_appendf(sb, "%+ld", exp-1);
+    str_append(sexp, "e");
+    str_appendf(sexp, "%+ld", exp-1);
 }
 
 static void render_mpfr_fixed(String *sb, StringView d, mpfr_exp_t exp, size_t max_digits)
@@ -297,7 +297,7 @@ static void render_mpfr_fixed(String *sb, StringView d, mpfr_exp_t exp, size_t m
 }
 
 // Render a floating point number.
-static void render_mpfr(String *sb, const mpfr_t n, int base, size_t max_digits, mpfr_rnd_t rnd)
+static void render_mpfr(String *sb, String *sexp, const mpfr_t n, int base, size_t max_digits, mpfr_rnd_t rnd, OutputFormat fmt)
 {
     if (mpfr_nan_p(n))
     {
@@ -347,8 +347,10 @@ static void render_mpfr(String *sb, const mpfr_t n, int base, size_t max_digits,
         str_append(sb, "-");
     }
 
-    if (exp > 6 || exp <= -6)
-        render_mpfr_sci(sb, d, exp, max_digits);
+    bool scientific = (fmt == FMT_AUTO && (exp > 6 || exp <= -6)) 
+                    || fmt == FMT_SCI;
+    if (scientific)
+        render_mpfr_sci(sb, sexp, d, exp, max_digits);
     else
         render_mpfr_fixed(sb, d, exp, max_digits);
 
@@ -356,7 +358,7 @@ static void render_mpfr(String *sb, const mpfr_t n, int base, size_t max_digits,
 }
 
 // Render a computable real as an interval.
-void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_digits)
+void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_digits, OutputFormat fmt)
 {
     mpfr_prec_t prec = mpfi_get_prec(n);
     mpfr_t lo, hi;
@@ -364,19 +366,27 @@ void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_di
     mpfi_get_left(lo, n);
     mpfi_get_right(hi, n);
 
-    String sba, sbb;
-    str_init(&sba);
-    str_init(&sbb);
+    String sba, expa;
+    String sbb, expb;
+    str_init(&sba); str_init(&expa);
+    str_init(&sbb); str_init(&expb);
 
-    render_mpfr(&sba, lo, base, max_digits, MPFR_RNDN);
-    render_mpfr(&sbb, hi, base, max_digits, MPFR_RNDN);
+    render_mpfr(&sba, &expa, lo, base, max_digits, MPFR_RNDN, fmt);
+    render_mpfr(&sbb, &expb, hi, base, max_digits, MPFR_RNDN, fmt);
+
     if (sba.len == 0 || sbb.len == 0)
     {
         str_append(sb, "?");
     }
+    else if (!sv_equal(expa, expb))
+    {
+        str_append(&sba, &expa);
+        str_append(&sbb, &expb);
+        str_appendf(sb, "["SV_FMT", "SV_FMT"]", SV_ARG(sba), SV_ARG(sbb));
+    }
     else if (sv_equal(sba, sbb))
     {
-        str_appendf(sb, SV_FMT, SV_ARG(SV(sba)));
+        str_appendf(sb, SV_FMT SV_FMT, SV_ARG(SV(sba)), SV_ARG(expa));
     }
     else
     {
@@ -389,9 +399,10 @@ void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_di
         }
         if (i < len-1)
             str_append(sb, "...");
+        str_append(sb, &expa);
     }
 
-    str_free(&sba);
-    str_free(&sbb);
+    str_free(&sba); str_free(&expa);
+    str_free(&sbb); str_free(&expb);
     mpfr_clears(lo, hi, NULL);
 }

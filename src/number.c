@@ -381,11 +381,14 @@ void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_di
     else
     {
         size_t len = sba.len < sbb.len ? sba.len : sbb.len;
-        for (size_t i = 0; i < len; i++)
+        size_t i = 0;
+        for (; i < len; i++)
         {
             if (sba.data[i] != sbb.data[i]) break;
             str_append(sb, (char)sba.data[i]);
         }
+        if (i < len-1)
+            str_append(sb, "...");
     }
 
     str_free(&sba);

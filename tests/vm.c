@@ -7,12 +7,13 @@
 #define START() \
     String sb; str_init(&sb); \
     RenderCtx ctx = { \
-        .prec = 50, \
-        .max_digits=10, \
-        .base=10, \
-        .num_form=NUMBER_RATIONAL, \
-        .src=SV(""), \
-        .use_color=false, \
+        .prec          = 50, \
+        .max_digits    = 10, \
+        .base          = 10, \
+        .fmt           = FMT_AUTO, \
+        .show_rational = false, \
+        .use_color     = false, \
+        .src           = SV(""), \
     }; \
     (void)ctx; \
     VM vm; vm_init(&vm); \
@@ -65,6 +66,11 @@
     CUT_CHECK(value_to_bool(v) == (b)); \
 } while (0)
 
+#define RENDER_EQ(got, want) do { \
+    if (!sv_equal(got, want)) \
+        CUT_ERROR("expected \""SV_FMT"\", found \""SV_FMT"\"", \
+                SV_ARG(SV(want)), SV_ARG(SV(got))); \
+} while (0)
 
 TEST(basic_arithmetics)
 {
@@ -88,10 +94,10 @@ TEST(boolean_render_correct)
 {
     START();
         EVAL_RENDER("999 * 0.5 < 666 * 0.8");
-        CUT_CHECK(sv_equal(sb, "'true"));
+        RENDER_EQ(sb, "'true");
 
         EVAL_RENDER("999 * 0.5 > 666 * 0.8");
-        CUT_CHECK(sv_equal(sb, "'false"));
+        RENDER_EQ(sb, "'false");
     END();
 }
 
@@ -99,41 +105,41 @@ TEST(integer_render_correct)
 {
     START();
         EVAL_RENDER("123");
-        CUT_CHECK(sv_equal(sb, "123"));
+        RENDER_EQ(sb, "123");
 
         EVAL_RENDER("16#FF");
-        CUT_CHECK(sv_equal(sb, "255"));
+        RENDER_EQ(sb, "255");
 
         ctx.base = 16;
         EVAL_RENDER("255");
         // GMP defaults to lowercase for base <= 36
-        CUT_CHECK(sv_equal(sb, "16#ff"));
+        RENDER_EQ(sb, "16#ff");
     END();
 }
 
 TEST(rational_render_correct)
 {
     START();
+        ctx.show_rational = true;
         EVAL_RENDER("0.3");
-        CUT_CHECK(sv_equal(sb, "3/10"));
+        RENDER_EQ(sb, "0.3 or 3/10");
 
         EVAL_RENDER("20 / 30");
-        CUT_CHECK(sv_equal(sb, "2/3"));
+        RENDER_EQ(sb, "0.(6) or 2/3");
     END();
 }
 
 TEST(decimal_render_correct)
 {
     START();
-        ctx.num_form = NUMBER_DECIMAL;
         EVAL_RENDER("0.3");
-        CUT_CHECK(sv_equal(sb, "0.3"));
+        RENDER_EQ(sb, "0.3");
 
         EVAL_RENDER("1/3");
-        CUT_CHECK(sv_equal(sb, "0.(3)"));
+        RENDER_EQ(sb, "0.(3)");
 
         EVAL_RENDER("5/6");
-        CUT_CHECK(sv_equal(sb, "0.8(3)"));
+        RENDER_EQ(sb, "0.8(3)");
     END();
 }
 
@@ -306,6 +312,6 @@ TEST(real_render_correct)
 {
     START();
         EVAL_RENDER("'pow 2 3");
-        CUT_CHECK(sv_equal(sb, "~= 8.0000000000"));
+        RENDER_EQ(sb, "~= 8.0000000000");
     END();
 }

@@ -132,14 +132,16 @@ Value *scope_get_symbol(Scope *scope, StringView id);
 
 typedef enum
 {
-    NUMBER_DECIMAL,
-    NUMBER_RATIONAL,
-} NumberForm;
+    FMT_AUTO,
+    FMT_FIXED,
+    FMT_SCI,
+} OutputFormat;
 
 typedef struct
 {
     StringView src;
-    NumberForm num_form;
+    OutputFormat fmt;
+    bool show_rational;
 
     mp_prec_t prec;
     unsigned long max_digits;

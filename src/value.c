@@ -347,17 +347,17 @@ static void value_render_exact(Value *v, String *sb, RenderCtx *ctx)
     }
 
     if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
-    switch (ctx->num_form)
-    {
-        case NUMBER_DECIMAL:
-            render_mpq_as_decimal(sb, v->as.exact, ctx->base, ctx->max_digits);
-            break;
 
-        case NUMBER_RATIONAL:
-            char *s = mpq_get_str(NULL, ctx->base, v->as.exact);
-            str_append(sb, s);
-            free(s);
-            break;
+    render_mpq_as_decimal(sb, v->as.exact, ctx->base, ctx->max_digits);
+
+    bool den_is_one = mpz_cmp_ui(mpq_denref(v->as.exact), 1) == 0;
+    if (ctx->show_rational && !den_is_one)
+    {
+        if (ctx->use_color) str_appendf(sb, AFMT_RESET AFMT_DIM);
+
+        char *s = mpq_get_str(NULL, ctx->base, v->as.exact);
+        str_appendf(sb, " or %s", s);
+        free(s);
     }
 
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);

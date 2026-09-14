@@ -2,35 +2,63 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 
+#ifndef _WIN32
+    #include <unistd.h>
+#endif
+
 #define CUT_IMPL
 #include "cut.h"
 
-const char cli_help[] = "Commands:\n"
-                        "     ccal help                  show this help\n"
-                        "     ccal <opts>                start interactive REPL\n"
-                        "     ccal eval <opts> <expr>    evaluate and output the result\n"
-                        "\n"
-                        "Options:\n"
-                        "    -d | --decimal              set the output form to decimal\n"
-                        "    -r | --rational             set the output form to rational\n"
-                        "    -o | --obase    n           set the output base to n\n"
-                        "    -i | --ibase    n           set the default input base to n\n"
-                        "    -p | --prec     n           set the precision for real number\n"
-                        "    -t | --truncate n           set the max number of digits in decimal form\n"
+#define FORMAT    "set the display format for numeric values"
+#define AUTO      "fixed-point by default, scientific for large exponent"
+#define FIXED     "force fixed-point notation"
+#define SCI       "force scientific notation"
+
+#define RATIONAL  "display rational form alongside output for exact values"
+#define OBASE     "set the output base"
+#define IBASE     "set the default input base"
+#define PRECISION "set the precision for real value"
+#define TRUNCATE  "set the max decimal places to truncate at"
+
+#define FORMAT_LIST \
+                    "Display Formats:\n" \
+                    "    auto                        "AUTO     "\n" \
+                    "    fixed                       "FIXED    "\n" \
+                    "    sci | scientific            "SCI      "\n"
+
+#define OPTIONS_REPL \
+                    "Options:\n" \
+                    "    ob  | obase     <n>         "OBASE    "\n" \
+                    "    ib  | ibase     <n>         "IBASE    "\n" \
+                    "    pr  | precision <n>         "PRECISION"\n" \
+                    "    tr  | truncate  <n>         "TRUNCATE "\n" \
+                    "    fmt | format    <fmt>       "FORMAT   "\n" \
+                    "    rat | rational              "RATIONAL "\n"
+
+const char cli_help[] =  "Commands:\n"
+                         "     ccal help                  show this help\n"
+                         "     ccal <opts>                start interactive REPL\n"
+                         "     ccal eval <opts> <expr>    evaluate and output the result\n"
+                         "\n"
+                         "Options:\n"
+                         "    -o | --obase    <n>         "OBASE    "\n"
+                         "    -i | --ibase    <n>         "IBASE    "\n"
+                         "    -p | --prec     <n>         "PRECISION"\n"
+                         "    -t | --truncate <n>         "TRUNCATE "\n"
+                         "    -f | --format   <fmt>       "FORMAT   "\n"
+                         "    -r | --rational             "RATIONAL "\n"
+                         "\n"
+                         FORMAT_LIST
 ;
 
 const char repl_help[] = "Commands:\n"
-                         "    :h, :help             show this help\n"
-                         "    :q, :quit             exit the REPL\n"
-                         "    :s, :set              set one of the options\n"
+                         "    :h, :help                   show this help\n"
+                         "    :q, :quit                   exit the REPL\n"
+                         "    :s, :set                    set options for the REPL\n"
                          "\n"
-                         "Options:\n"
-                         "    dec | decimal         set the output form to decimal\n"
-                         "    rat | rational        set the output form to rational\n"
-                         "    ob  | obase=n         set the output base to n\n"
-                         "    ib  | ibase=n         set the default input base to n\n"
-                         "    pr  | precision=n     set the precision for real number\n"
-                         "    tr  | truncate=n      set the max number of digits in decimal form\n"
+                         OPTIONS_REPL
+                         "\n"
+                         FORMAT_LIST
 ;
 
 int clear_screen(int count, int key)
@@ -42,68 +70,113 @@ int clear_screen(int count, int key)
     return 0;
 }
 
+#define printc(c, s, ...) do { \
+    if (ctx->use_color) printf(AFMT_RESET"%s", (c)); \
+    printf(s __VA_OPT__(,) __VA_ARGS__); \
+    if (ctx->use_color) printf(AFMT_RESET); \
+} while (0)
+
+#define appendc(sb, c, s, ...) do { \
+    if (ctx->use_color) str_appendf((sb), AFMT_RESET"%s", (c)); \
+    str_appendf((sb), (s) __VA_OPT__(,) __VA_ARGS__); \
+    if (ctx->use_color) str_append((sb), AFMT_RESET); \
+} while (0)
+
 // Setting the parameter with the set command.
-void repl_set_param_value(StringView s, unsigned long *v)
+static bool repl_set_numeric(StringView s, unsigned long *v, RenderCtx *ctx)
 {
     s = sv_trim(s);
     if (s.len == 0)
     {
-        printf("missing value\n");
-        return;
+        printc(ACOLOR_RED, "Missing value.\n");
+        return false;
     }
     int val = 0;
     if (!sv_to_int(s, &val))
     {
-        printf("invalid value\n");
-        return;
+        printc(ACOLOR_RED, "Invalid value.\n");
+        return false;
     }
-
     *v = val;
+    return true;
 }
 
 // Handle the set command.
-void repl_handle_set_command(VM *vm, RenderCtx *ctx, StringView src)
+static void repl_handle_set_command(VM *vm, RenderCtx *ctx, StringView src)
 {
-    StringView param = sv_split(&src, '=');
+    StringView param;
+    if (sv_find(src, '=') != SIZE_MAX)
+        param = sv_split(&src, '=');
+    else
+        param = sv_split(&src, ' ');
+
     param = sv_trim(param);
 
     if (param.len == 0)
     {
-        printf("missing option\n");
-    }
-    else if (sv_equal(param, "dec") || sv_equal(param, "decimal"))
-    {
-        ctx->num_form = NUMBER_DECIMAL;
-        printf("output form: decimal\n");
-    }
-    else if (sv_equal(param, "rat") || sv_equal(param, "rational"))
-    {
-        ctx->num_form = NUMBER_RATIONAL;
-        printf("output form: rational\n");
+        printc(ACOLOR_RED, "Missin option.\n");
+        printc(ACOLOR_CYAN, OPTIONS_REPL);
     }
     else if (sv_equal(param, "ob") || sv_equal(param, "obase"))
     {
-        repl_set_param_value(src, &ctx->base);
-        printf("output base: %lu\n", ctx->base);
+        if (!repl_set_numeric(src, &ctx->base, ctx)) return;
+        printc(AFMT_DIM, "Output base: ");
+        printc(ACOLOR_CYAN, "%lu\n", ctx->base);
     }
     else if (sv_equal(param, "ib") || sv_equal(param, "ibase"))
     {
-        repl_set_param_value(src, &vm->base);
-        printf("input base: %lu\n", vm->base);
+        if (!repl_set_numeric(src, &vm->base, ctx)) return;
+        printc(AFMT_DIM, "Input base: ");
+        printc(ACOLOR_CYAN, "%lu\n", vm->base);
     }
     else if (sv_equal(param, "pr") || sv_equal(param, "precision"))
     {
-        repl_set_param_value(src, (unsigned long *)&ctx->prec);
-        printf("precision: %lu\n", ctx->prec);
+        if (!repl_set_numeric(src, (unsigned long *)&ctx->prec, ctx)) return;
+        printc(AFMT_DIM, "Precision: ");
+        printc(ACOLOR_CYAN, "%lu\n", ctx->prec);
     }
     else if (sv_equal(param, "tr") || sv_equal(param, "truncate"))
     {
-        repl_set_param_value(src, &ctx->max_digits);
-        printf("truncate at: %lu\n", ctx->max_digits);
+        if (!repl_set_numeric(src, &ctx->max_digits, ctx)) return;
+        printc(AFMT_DIM, "Truncate: ");
+        printc(ACOLOR_CYAN, "%lu\n", ctx->max_digits);
+    }
+    else if (sv_equal(param, "rat") || sv_equal(param, "rational"))
+    {
+        ctx->show_rational = !ctx->show_rational;
+        printc(AFMT_DIM, "Show rational: ");
+        printc(ACOLOR_CYAN, "%s\n", ctx->show_rational ? "on" : "off");
+    }
+    else if (sv_equal(param, "fmt") || sv_equal(param, "format"))
+    {
+        if (sv_equal(src, "auto"))
+        {
+            ctx->fmt = FMT_AUTO;
+            printc(AFMT_DIM, "Display format: ");
+            printc(ACOLOR_CYAN, "auto\n");
+        }
+        else if (sv_equal(src, "fixed"))
+        {
+            ctx->fmt = FMT_FIXED;
+            printc(AFMT_DIM, "Display format: ");
+            printc(ACOLOR_CYAN, "fixed\n");
+        }
+        else if (sv_equal(src, "sci"))
+        {
+            ctx->fmt = FMT_SCI;
+            printc(AFMT_DIM, "Display format: ");
+            printc(ACOLOR_CYAN, "scientific\n");
+        }
+        else 
+        {
+            printc(ACOLOR_RED, "Unknown format.\n");
+            printc(ACOLOR_CYAN, FORMAT_LIST);
+        }
     }
     else
     {
-        printf("unknown option\n");
+        printc(ACOLOR_RED, "Unknown option.\n");
+        printc(ACOLOR_CYAN, OPTIONS_REPL);
     }
 }
 
@@ -119,7 +192,7 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
 
     if (sv_equal(cmd, "q") || sv_equal(cmd, "quit"))
     {
-        printf("exit\n");
+        printf("Exit.\n");
         should_continue = false;
     }
     else if (sv_equal(cmd, "h") || sv_equal(cmd, "help"))
@@ -140,7 +213,8 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
     }
     else
     {
-        printf("unknown command\n");
+        printc(ACOLOR_RED, "Unknown command.\n");
+        printc(ACOLOR_CYAN, repl_help);
     }
 
     if (ctx->use_color) printf(AFMT_RESET);
@@ -209,12 +283,14 @@ int main(int argc, char **argv)
     vm_init(&vm);
 
     RenderCtx ctx = {
-        .base = 10,
-        .prec = 50,
-        .max_digits = 10,
-        .num_form = NUMBER_RATIONAL,
-        .use_color = isatty(fileno(stdout)),
+        .base          = 10,
+        .prec          = 50,
+        .max_digits    = 10,
+        .fmt           = FMT_AUTO,
+        .show_rational = false,
+        .use_color     = isatty(fileno(stdout)),
     };
+    StringView fmt = SV("auto");
 
     CutFlagParser fp;
     cut_fp_init(&fp);
@@ -222,34 +298,30 @@ int main(int argc, char **argv)
     SVList args;
     da_init(&args);
 
-    bool rational = false;
-    bool decimal = false;
-
     cut_fp_add_command(&fp, SV("eval"));
     cut_fp_add_command(&fp, SV("help"));
 
-    cut_fp_add_flag(&fp, (int *)(&vm.base),        SV("ibase"), .short_name='i');
-    cut_fp_add_flag(&fp, (int *)(&ctx.base),       SV("obase"), .short_name='o');
-    cut_fp_add_flag(&fp, (int *)(&ctx.max_digits), SV("truncate"), .short_name='t');
-
-    cut_fp_add_flag(&fp, &rational, SV("rational"), .short_name='r');
-    cut_fp_add_flag(&fp, &decimal,  SV("decimal"),  .short_name='d');
+    cut_fp_add_flag(&fp, (int *)(&ctx.base),       SV("obase"),     .short_name='o');
+    cut_fp_add_flag(&fp, (int *)(&vm.base),        SV("ibase"),     .short_name='i');
+    cut_fp_add_flag(&fp, (int *)(&ctx.prec),       SV("precision"), .short_name='p');
+    cut_fp_add_flag(&fp, (int *)(&ctx.max_digits), SV("truncate"),  .short_name='t');
+    cut_fp_add_flag(&fp, &fmt,                     SV("format"),    .short_name='f');
+    cut_fp_add_flag(&fp, &ctx.show_rational,       SV("rational"),  .short_name='r');
 
     cut_fp_parse(&fp, argc, argv, &args);
-    StringView cmd = cut_fp_get_command(&fp, argc, argv);
-    cut_fp_free(&fp);
 
-    if (decimal && rational)
+    if      (sv_equal(fmt, "auto"))  ctx.fmt = FMT_AUTO;
+    else if (sv_equal(fmt, "fixed")) ctx.fmt = FMT_FIXED;
+    else if (sv_equal(fmt, "sci"))   ctx.fmt = FMT_SCI;
+    else
     {
-        fprintf(stderr, "only one output form can be specified\n");
+        fprintf(stderr, "Unknown format.\n"FORMAT_LIST);
         return 1;
     }
 
-    if (decimal)
-        ctx.num_form = NUMBER_DECIMAL;
+    StringView cmd = cut_fp_get_command(&fp, argc, argv);
 
     bool ok = true;
-
     if (sv_equal(cmd, "help"))
     {
         printf(cli_help);
@@ -261,7 +333,7 @@ int main(int argc, char **argv)
 
         if (args.len == 0)
         {
-            fprintf(stderr, "missing expression\n");
+            fprintf(stderr, "Empty expression\n");
             return 1;
         }
 
@@ -276,6 +348,7 @@ int main(int argc, char **argv)
         repl_start(&vm, &ctx);
     }
 
+    cut_fp_free(&fp);
     da_free(&args);
     vm_free(&vm);
     return ok ? 0 : 1;

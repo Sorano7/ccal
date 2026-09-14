@@ -55,7 +55,7 @@ Value *value_bool(Span span, bool b)
     return value_builtin(span, b ? BUILTIN_TRUE : BUILTIN_FALSE, 2);
 }
 
-Value *value_lambda(Expr *e, Scope *s)
+Value *value_lambda(const Expr *e, Scope *s)
 {
     Value *v = value_new(VAL_LAMBDA, e->span);
     v->as.lambda.expr = expr_clone(e);
@@ -229,7 +229,7 @@ const char *builtin_to_str[] = {
 };
 
 // Get the builtin kind from an expression
-BuiltinKind builtin_kind(Expr *e)
+BuiltinKind builtin_kind(const Expr *e)
 {
     if (e->kind != EXPR_IDENT)
         return BUILTIN_NONE;

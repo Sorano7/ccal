@@ -29,13 +29,13 @@ void vm_free(VM *v)
 }
 
 // Evaluate a number expression.
-static Value *eval_number(Expr *e)
+static Value *eval_number(const Expr *e)
 {
     return value_exact(e->span, e->as.number);
 }
 
 // Evaluate a builtin identifier.
-static Value *eval_builtin(VM *v, Expr *e, BuiltinKind b)
+static Value *eval_builtin(VM *v, const Expr *e, BuiltinKind b)
 {
     switch (b)
     {
@@ -60,19 +60,20 @@ static Value *eval_builtin(VM *v, Expr *e, BuiltinKind b)
 }
 
 // Evaluate an identifier
-static Value *eval_ident(VM *v, Expr *e)
+static Value *eval_ident(VM *v, const Expr *e)
 {
     BuiltinKind builtin = builtin_kind(e);
     if (builtin != BUILTIN_NONE)
         return eval_builtin(v, e, builtin);
 
     Value *out = scope_get_symbol(v->scope, SV(e->as.id));
+    if (!out) return value_errorf(e->span, "Undefined symbol");
     out->span = e->span;
-    return out ? out : value_errorf(e->span, "Undefined symbol");
+    return out;
 }
 
 // Evaluate a prefix expression.
-static Value *eval_prefix(VM *v, Expr *e)
+static Value *eval_prefix(VM *v, const Expr *e)
 {
     Value *out = vm_eval_expr(v, e->as.prefix.expr);
     if (value_is_err(out)) return out;
@@ -119,7 +120,7 @@ static Value *eval_prefix(VM *v, Expr *e)
 #define MPQ_CMP(l, r) mpq_cmp((l)->as.exact, (r)->as.exact)
 
 // Evaluate one number raised to the power of the other.
-static Value *eval_number_power(Value *l, Value *r)
+static Value *eval_exact_power(const Value *l, const Value *r)
 {
     if (mpz_cmp_ui(mpq_denref(r->as.exact), 1) != 0)
         return value_errorf(r->span, "Use <'pow> for non-integer exponents");
@@ -138,7 +139,7 @@ static Value *eval_number_power(Value *l, Value *r)
 }
 
 // Evaluate comparison and equality between exact values.
-static Value *eval_exact_bool_infix(Value *l, Expr *e, Value *r)
+static Value *eval_exact_bool_infix(const Value *l, const Expr *e, const Value *r)
 {
     bool b;
 
@@ -173,10 +174,10 @@ static bool op_is_cmp_or_eq(Operator op)
 }
 
 // Evaluate an infix operation between two exact numbers.
-static Value *eval_exact_infix(Value *l, Expr *e, Value *r)
+static Value *eval_exact_infix(const Value *l, const Expr *e, const Value *r)
 {
     if (e->as.infix.op == OP_POW)
-        return eval_number_power(l, r);
+        return eval_exact_power(l, r);
     if (op_is_cmp_or_eq(e->as.infix.op))
         return eval_exact_bool_infix(l, e, r);
 
@@ -204,7 +205,7 @@ static Value *eval_exact_infix(Value *l, Expr *e, Value *r)
 }
 
 // Evaluate infix between two real numbers.
-static Value *eval_real_infix(Value *l, Expr *e, Value *r)
+static Value *eval_real_infix(const Value *l, const Expr *e, const Value *r)
 {
     CR *n = NULL;
     switch (e->as.infix.op)
@@ -220,7 +221,7 @@ static Value *eval_real_infix(Value *l, Expr *e, Value *r)
 }
 
 // Evaluate an infix operation between two booleans.
-static Value *eval_bool_infix(Value *l, Expr *e, Value *r)
+static Value *eval_bool_infix(const Value *l, const Expr *e, const Value *r)
 {
     bool lb = value_to_bool(l);
     bool rb = value_to_bool(r);
@@ -236,9 +237,9 @@ static Value *eval_bool_infix(Value *l, Expr *e, Value *r)
 }
 
 // Evaluate an assignment infix operation.
-static Value *eval_assign_infix(VM *v, Expr *e)
+static Value *eval_assign_infix(VM *v, const Expr *e)
 {
-    Expr *l = e->as.infix.left;
+    const Expr *l = e->as.infix.left;
     if (l->kind != EXPR_IDENT)
         return value_error_expr_kind(l, EXPR_IDENT);
 
@@ -259,13 +260,13 @@ static Value *eval_assign_infix(VM *v, Expr *e)
 }
 
 // Evaluate a lambda application.
-static Value *eval_lambda_apply(VM *v, Value *f, Value *arg)
+static Value *eval_lambda_apply(VM *v, const Value *f, Value *arg)
 {
     Scope *s = scope_from(f->as.lambda.env);
     Scope *prev = v->scope;
     v->scope = s;
 
-    Expr *func = f->as.lambda.expr;
+    const Expr *func = f->as.lambda.expr;
     if (func->as.lambda.param->kind == EXPR_IDENT)
         scope_set_symbol(v->scope, SV(func->as.lambda.param->as.id), arg);
     Value *out = vm_eval_expr(v, func->as.lambda.body);
@@ -292,7 +293,7 @@ static Value *eval_builtin_bool(Value *f, Value *arg)
 } while (0)
 
 // Evaluate a builtin unary function on real values.
-static Value *eval_builtin_real_unary(CRUnary fn, Value *arg)
+static Value *eval_builtin_real_unary(CRUnary fn, const Value *arg)
 {
     CR *x = NULL;
     AS_REAL(arg, x);
@@ -302,7 +303,7 @@ static Value *eval_builtin_real_unary(CRUnary fn, Value *arg)
 }
 
 // Evaluate a builtin binary function on real values.
-static Value *eval_builtin_real_binary(Value *f, CRBinary fn, Value *right)
+static Value *eval_builtin_real_binary(const Value *f, CRBinary fn, const Value *right)
 {
     Value *left = da_at(&f->as.builtin.args, 0);
 
@@ -341,7 +342,7 @@ static Value *eval_builtin_apply(Value *f, Value *arg)
 }
 
 // Evaluate an application expression.
-static Value *eval_apply(VM *v, Expr *f, Expr *a)
+static Value *eval_apply(VM *v, const Expr *f, const Expr *a)
 {
     Value *func = vm_eval_expr(v, f);
     if (value_is_err(func)) return func;
@@ -368,7 +369,7 @@ static Value *eval_apply(VM *v, Expr *f, Expr *a)
 }
 
 // Evaluate an infix operation.
-static Value *eval_infix(VM *v, Expr *e)
+static Value *eval_infix(VM *v, const Expr *e)
 {
     if (e->as.infix.op == OP_ASSIGN)
         return eval_assign_infix(v, e);
@@ -430,7 +431,7 @@ static Value *eval_infix(VM *v, Expr *e)
 }
 
 // Capture free variables from the current scope that are no shadowed by params.
-static void capture_free_vars(VM *v, Expr *e, Scope *s)
+static void capture_free_vars(VM *v, const Expr *e, Scope *s)
 {
     switch (e->kind)
     {
@@ -469,7 +470,7 @@ static void capture_free_vars(VM *v, Expr *e, Scope *s)
 }
 
 // Evaluate a lambda expression.
-static Value *eval_lambda(VM *v, Expr *e)
+static Value *eval_lambda(VM *v, const Expr *e)
 {
     Scope *s = scope_from(NULL);
     capture_free_vars(v, e->as.lambda.body, s);
@@ -477,7 +478,7 @@ static Value *eval_lambda(VM *v, Expr *e)
 }
 
 // Evaluate a conditional expression.
-static Value *eval_cond(VM *v, Expr *e)
+static Value *eval_cond(VM *v, const Expr *e)
 {
     Value *cond = vm_eval_expr(v, e->as.cond.if_);
     if (value_is_err(cond)) return cond;
@@ -498,7 +499,7 @@ static Value *eval_cond(VM *v, Expr *e)
 }
 
 // Evaluate an expression.
-Value *vm_eval_expr(VM *v, Expr *e)
+Value *vm_eval_expr(VM *v, const Expr *e)
 {
     if (is_error(e))
         return value_error_from_expr(e);
@@ -535,7 +536,7 @@ Value *vm_run(VM *v, StringView src)
 
     DA_FOR(&m, i)
     {
-        Expr *e = da_at(&m, i);
+        const Expr *e = da_at(&m, i);
         out = vm_eval_expr(v, e);
         if (value_is_err(out))
             goto cleanup;

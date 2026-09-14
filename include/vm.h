@@ -15,7 +15,7 @@ void vm_reset(VM *v);
 void vm_free(VM *v);
 
 Value *vm_run(VM *v, StringView src);
-Value *vm_eval_expr(VM *v, Expr *e);
+Value *vm_eval_expr(VM *v, const Expr *e);
 
 void vm_env_render(VM *v, String *sb, RenderCtx *ctx);
 

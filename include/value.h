@@ -103,7 +103,7 @@ Value *value_exact(Span span, const mpq_t n);
 Value *value_real(Span span, CR *n);
 Value *value_bool(Span span, bool b);
 Value *value_builtin(Span span, BuiltinKind kind, size_t arity);
-Value *value_lambda(Expr *e, Scope *s);
+Value *value_lambda(const Expr *e, Scope *s);
 
 Value *value_errorf(Span span, const char *fmt, ...);
 Value *value_error_from_expr(const Expr *e);
@@ -121,7 +121,7 @@ void value_release(Value **vp);
 bool value_is_bool(const Value *v);
 bool value_to_bool(const Value *v);
 
-BuiltinKind builtin_kind(Expr *e);
+BuiltinKind builtin_kind(const Expr *e);
 
 void scope_release(Scope *s);
 void scope_release_r(Scope *s);

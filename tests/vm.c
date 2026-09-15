@@ -334,3 +334,18 @@ TEST(power_converts_to_real)
         BOOL_EQ(val, true);
     END();
 }
+
+TEST(sqrt_rejects_negative)
+{
+    START();
+        EVAL_FAIL("'sqrt -1");
+    END();
+}
+
+TEST(ln_log_rejects_negative_and_zero)
+{
+    START();
+        EVAL_FAIL("'ln 0");
+        EVAL_FAIL("'log 2 -2");
+    END();
+}

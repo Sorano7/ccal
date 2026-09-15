@@ -157,6 +157,8 @@ CR *cr_neg(CR *a)
 
 CR *cr_sqrt(CR *a) 
 {
+    if (cr_sign(a) < 0)
+        return cr_error("Expected non-negative operand");
     return cr_new_unary(CR_OP_SQRT, a);
 }
 

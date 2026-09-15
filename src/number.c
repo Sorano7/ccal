@@ -1,6 +1,7 @@
 #include "number.h"
 #include <stdlib.h>
 #include <assert.h>
+#include <math.h>
 
 #define DIGIT_TO_0     48
 #define UPPER_TO_10    55
@@ -412,4 +413,15 @@ void render_mpfi(String *sb, const mpfi_t n, int base, size_t max_digits, Output
     str_free(&sba); str_free(&expa);
     str_free(&sbb); str_free(&expb);
     mpfr_clears(lo, hi, NULL);
+}
+
+double bit_estimate(double b, double x)
+{
+    b = fabs(b);
+    return x * log2(b);
+}
+
+double bit_estimate_mpq(const mpq_t b, const mpq_t x)
+{
+    return bit_estimate(mpq_get_d(b), mpq_get_d(x));
 }

@@ -84,6 +84,15 @@ Value *value_error_from_expr(const Expr *e)
     return v;
 }
 
+Value *value_error_from_cr(Span span, const CR *n)
+{
+    DEV_MUST(cr_is_error(n));
+    Value *v = value_new(VAL_ERROR, span);
+    str_init(&v->as.error);
+    cr_get_error(n, &v->as.error);
+    return v;
+}
+
 Value *value_error_undefined_op(const Value *l, const Expr *e, const Value *r)
 {
     if (e->kind == EXPR_PREFIX)

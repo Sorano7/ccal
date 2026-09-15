@@ -15,7 +15,7 @@ void shared_config(CutUnit *u)
     cut_unit_flags(u, "-g", "-Wall", "-Wextra", "-Wno-override-init");
     cut_unit_flags(u, "-static");
     // cut_unit_flags(u, "-fsanitize=address,undefined");
-    cut_unit_libs(u, "mpfi", "mpfr", "gmp");
+    cut_unit_libs(u, "mpfi", "mpfr", "gmp", "m");
 }
 
 int main(int argc, char **argv)

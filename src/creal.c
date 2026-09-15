@@ -1,4 +1,5 @@
 #include "creal.h"
+#include "number.h"
 #include "cut.h"
 #include <stdlib.h>
 #include <math.h>
@@ -6,8 +7,12 @@
 #define GUARD_BITS 32
 #define MAX_PREC_BITS (1u << 20)
 
+#define APPROX_TOL 1e-12
+#define APPROX_D(a, b) (fabs(a - b) < APPROX_TOL)
+
 typedef enum
 {
+    CR_ERROR,
     CR_LEAF_RATIONAL,
     CR_LEAF_PI,
     CR_LEAF_E,
@@ -26,19 +31,33 @@ typedef enum
 
 typedef struct CRNode
 {
-    struct CRNode *l;
-    struct CRNode *r;
+    union
+    {
+        struct
+        {
+            struct CRNode *l;
+            struct CRNode *r;
 
-    mpq_t rational;
+            mpq_t rational;
 
-    mpfi_t cached_interval;
-    mp_prec_t cached_prec;
-    bool has_cache;
+            mpfi_t cached_interval;
+            mp_prec_t cached_prec;
+            bool has_cache;
+        } node;
 
+        String error;
+    };
     size_t refcount;
-
     CRKind kind;
 } CR;
+
+static int cr_sign(CR *n)
+{
+    double d = cr_to_d(n);
+    if (APPROX_D(d, 0))
+        return 0;
+    return d > 0;
+}
 
 // Allocate a new CR node.
 static CR *cr_new(CRKind kind)
@@ -46,30 +65,44 @@ static CR *cr_new(CRKind kind)
     CR *n = calloc(1, sizeof(CR));
     n->kind = kind;
     n->refcount = 1;
-    n->has_cache = false;
+    n->node.has_cache = false;
+    return n;
+}
+
+static CR *cr_error(const char *fmt, ...)
+{
+    CR *n = calloc(1, sizeof(CR));
+    n->kind = CR_ERROR;
+    str_init(&n->error);
+
+    va_list args;
+    va_start(args, fmt);
+    str_appendvf(&n->error, fmt, args);
+    va_end(args);
+
     return n;
 }
 
 static CR *cr_new_binary(CRKind kind, CR *a, CR *b)
 {
     CR *n = cr_new(kind);
-    n->l = a; a->refcount++;
-    n->r = b; b->refcount++;
+    n->node.l = a; a->refcount++;
+    n->node.r = b; b->refcount++;
     return n;
 }
 
 static CR *cr_new_unary(CRKind kind, CR *a)
 {
     CR *n = cr_new(kind);
-    n->l = a; a->refcount++;
+    n->node.l = a; a->refcount++;
     return n;
 }
 
 CR *cr_from_mpq(const mpq_t q)
 {
     CR *n = cr_new(CR_LEAF_RATIONAL);
-    mpq_init(n->rational);
-    mpq_set(n->rational, q);
+    mpq_init(n->node.rational);
+    mpq_set(n->node.rational, q);
     return n;
 }
 
@@ -85,23 +118,81 @@ CR *cr_from_si(long n, long d)
     return c;
 }
 
-CR *cr_pi(void)          { return cr_new(CR_LEAF_PI); }
-CR *cr_e(void)           { return cr_new(CR_LEAF_E); }
+CR *cr_pi(void)
+{
+    return cr_new(CR_LEAF_PI);
+}
 
-CR *cr_add(CR *a, CR *b) { return cr_new_binary(CR_OP_ADD, a, b); }
-CR *cr_sub(CR *a, CR *b) { return cr_new_binary(CR_OP_SUB, a, b); }
-CR *cr_mul(CR *a, CR *b) { return cr_new_binary(CR_OP_MUL, a, b); }
-CR *cr_div(CR *a, CR *b) { return cr_new_binary(CR_OP_DIV, a, b); }
+CR *cr_e(void)
+{
+    return cr_new(CR_LEAF_E);
+}
 
-CR *cr_neg(CR *a)        { return cr_new_unary(CR_OP_NEG, a); }
-CR *cr_sqrt(CR *a)       { return cr_new_unary(CR_OP_SQRT, a); }
+CR *cr_add(CR *a, CR *b)
+{
+    return cr_new_binary(CR_OP_ADD, a, b);
+}
 
-CR *cr_exp(CR *x)        { return cr_new_unary(CR_OP_EXP, x); }
-CR *cr_ln(CR *x)         { return cr_new_unary(CR_OP_LN, x); }
+CR *cr_sub(CR *a, CR *b)
+{
+    return cr_new_binary(CR_OP_SUB, a, b);
+}
+
+CR *cr_mul(CR *a, CR *b)
+{
+    return cr_new_binary(CR_OP_MUL, a, b);
+}
+
+CR *cr_div(CR *a, CR *b)
+{
+    if (cr_sign(b) == 0)
+        return cr_error("Division by zero");
+    return cr_new_binary(CR_OP_DIV, a, b);
+}
+
+CR *cr_neg(CR *a)
+{
+    return cr_new_unary(CR_OP_NEG, a);
+}
+
+CR *cr_sqrt(CR *a) 
+{
+    return cr_new_unary(CR_OP_SQRT, a);
+}
+
+CR *cr_exp(CR *x)
+{
+    CR *e = cr_e();
+    double base = cr_to_d(e);
+    double exp = cr_to_d(x);
+    double bits = bit_estimate(base, exp);
+    cr_release(&e);
+
+    if (mpfr_get_emax() < bits)
+        return cr_error("Exponent too large");
+
+    return cr_new_unary(CR_OP_EXP, x);
+}
+
+CR *cr_ln(CR *x) 
+{
+    if (cr_sign(x) <= 0)
+        return cr_error("Undefined logarithm");
+    return cr_new_unary(CR_OP_LN, x);
+}
 
 CR *cr_pow(CR *b, CR *x)
 {
+    double base = cr_to_d(b);
+    double exp = cr_to_d(x);
+    double bits = bit_estimate(base, exp);
+    if (mpfr_get_emax() < bits)
+        return cr_error("Exponent too large");
+
     CR *ln_b = cr_ln(b);
+    if (cr_is_error(ln_b))
+        return ln_b;
+
     CR *prod = cr_mul(x, ln_b);
     CR *n = cr_exp(prod);
     cr_release(&ln_b);
@@ -112,7 +203,16 @@ CR *cr_pow(CR *b, CR *x)
 CR *cr_log(CR *b, CR *x)
 {
     CR *ln_x = cr_ln(x);
+    if (cr_is_error(ln_x))
+        return ln_x;
+
     CR *ln_b = cr_ln(b);
+    if (cr_is_error(ln_b))
+    {
+        cr_release(&ln_x);
+        return ln_b;
+    }
+
     CR *n = cr_div(ln_x, ln_b);
     cr_release(&ln_x);
     cr_release(&ln_b);
@@ -133,13 +233,20 @@ void cr_release(CR **np)
     CR *n = *np;
     if (--n->refcount > 0) return;
 
-    if (n->kind == CR_LEAF_RATIONAL)
-        mpq_clear(n->rational);
-    if (n->has_cache)
-        mpfi_clear(n->cached_interval);
+    if (n->kind == CR_ERROR)
+    {
+        str_free(&n->error);
+    }
+    else
+    {
+        if (n->kind == CR_LEAF_RATIONAL)
+            mpq_clear(n->node.rational);
+        if (n->node.has_cache)
+            mpfi_clear(n->node.cached_interval);
 
-    cr_release(&n->l);
-    cr_release(&n->r);
+        cr_release(&n->node.l);
+        cr_release(&n->node.r);
+    }
     free(n);
     *np = NULL;
 }
@@ -149,8 +256,8 @@ static void cr_rational_eval(CR *n, mp_prec_t p, mpfi_t out)
     mpfr_t lo, hi;
     mpfr_inits2(p, lo, hi, NULL);
 
-    mpfr_set_q(lo, n->rational, MPFR_RNDD);
-    mpfr_set_q(hi, n->rational, MPFR_RNDU);
+    mpfr_set_q(lo, n->node.rational, MPFR_RNDD);
+    mpfr_set_q(hi, n->node.rational, MPFR_RNDU);
 
     mpfi_interv_fr(out, lo, hi);
     mpfr_clears(lo, hi, NULL);
@@ -179,8 +286,8 @@ static void cr_e_eval(mp_prec_t p, mpfi_t out)
 #define MPFI_BINARY(fn) do { \
     mpfi_t li, ri; \
     mpfi_inits2(p, li, ri, NULL); \
-    cr_eval(n->l, p, li); \
-    cr_eval(n->r, p, ri); \
+    cr_eval(n->node.l, p, li); \
+    cr_eval(n->node.r, p, ri); \
     (fn)(out, li, ri); \
     mpfi_clears(li, ri, NULL); \
 } while (0)
@@ -188,7 +295,7 @@ static void cr_e_eval(mp_prec_t p, mpfi_t out)
 #define MPFI_UNARY(fn) do { \
     mpfi_t ci; \
     mpfi_init2(ci, p); \
-    cr_eval(n->l, p, ci); \
+    cr_eval(n->node.l, p, ci); \
     (fn)(out, ci); \
     mpfi_clear(ci); \
 } while (0)
@@ -196,15 +303,15 @@ static void cr_e_eval(mp_prec_t p, mpfi_t out)
 // Evaluate a CR to an interval enclosure.
 void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result)
 {
-    if (n->has_cache && n->cached_prec >= target_prec)
+    if (n->node.has_cache && n->node.cached_prec >= target_prec)
     {
-        mpfi_set(result, n->cached_interval);
+        mpfi_set(result, n->node.cached_interval);
         return;
     }
 
     mp_prec_t p = target_prec + GUARD_BITS;
-    if (n->has_cache && n->cached_prec * 2 > p)
-        p = n->cached_prec * 2;
+    if (n->node.has_cache && n->node.cached_prec * 2 > p)
+        p = n->node.cached_prec * 2;
 
     mpfi_t out;
     mpfi_init2(out, p);
@@ -244,14 +351,14 @@ void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result)
         mpfi_set_prec(out, p);
     }
 
-    if (n->has_cache)
-        mpfi_clear(n->cached_interval);
+    if (n->node.has_cache)
+        mpfi_clear(n->node.cached_interval);
 
-    mpfi_init2(n->cached_interval, p);
-    mpfi_set(n->cached_interval, out);
+    mpfi_init2(n->node.cached_interval, p);
+    mpfi_set(n->node.cached_interval, out);
 
-    n->cached_prec = p;
-    n->has_cache = true;
+    n->node.cached_prec = p;
+    n->node.has_cache = true;
 
     mpfi_set(result, out);
     mpfi_clear(out);
@@ -271,5 +378,16 @@ bool cr_approx(CR *a, CR *b)
 {
     double da = cr_to_d(a);
     double db = cr_to_d(b);
-    return fabs(da - db) <= 1e-12;
+    return APPROX_D(da, db);
+}
+
+bool cr_is_error(const CR *n)
+{
+    return n->kind == CR_ERROR;
+}
+
+void cr_get_error(const CR *n, String *sb)
+{
+    if (!cr_is_error(n)) return;
+    str_append(sb, &n->error);
 }

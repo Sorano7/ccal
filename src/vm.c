@@ -125,8 +125,11 @@ static Value *eval_exact_power(const Value *l, const Value *r)
     if (mpz_cmp_ui(mpq_denref(r->as.exact), 1) != 0)
         return value_errorf(r->span, "Use <'pow> for non-integer exponents");
 
-    if (!mpz_fits_ulong_p(mpq_numref(r->as.exact)))
-        return value_errorf(r->span, "Use <'pow> for large exponents");
+    bool fit_ul = mpz_fits_ulong_p(mpq_numref(r->as.exact));
+    bool can_render = bit_estimate_mpq(l->as.exact, r->as.exact) < RENDER_BITS_MAX;
+
+    if (!fit_ul || !can_render)
+        return value_errorf(r->span, "Exponent too large");
 
     Span s = {l->span.from, r->span.to};
     Value *out = value_exact(s, l->as.exact);
@@ -233,6 +236,13 @@ static Value *eval_real_infix(const Value *l, const Expr *e, const Value *r)
 
         default:     return value_error_undefined_op(l, e, r);
     }
+
+    if (cr_is_error(n))
+    {
+        Value *out = value_error_from_cr(e->span, n);
+        cr_release(&n);
+        return out;
+    }
     return value_real(e->span, n);
 }
 
@@ -313,7 +323,21 @@ static Value *eval_builtin_real_unary(CRUnary fn, const Value *arg)
 {
     CR *x = NULL;
     AS_REAL(arg, x);
-    Value *out = value_real(arg->span, fn(x));
+
+    Value *out = NULL;
+    if (cr_is_error(x))
+    {
+        out = value_error_from_cr(arg->span, x);
+    }
+    else
+    {
+        CR *n = fn(x);
+        if (cr_is_error(n))
+            out = value_error_from_cr(arg->span, n);
+        else
+            out = value_real(arg->span, fn(x));
+    }
+
     cr_release(&x);
     return out;
 }
@@ -323,10 +347,30 @@ static Value *eval_builtin_real_binary(const Value *f, CRBinary fn, const Value 
 {
     Value *left = da_at(&f->as.builtin.args, 0);
 
+    Value *out = NULL;
+    Span span = {left->span.from, right->span.to};
+
     CR *l = NULL, *r = NULL;
     AS_REAL(left, l);
+    if (cr_is_error(l))
+    {
+        out = value_error_from_cr(span, l);
+        goto done;
+    }
     AS_REAL(right, r);
-    Value *out = value_real((Span){left->span.from, right->span.to}, fn(l, r));
+    if (cr_is_error(r))
+    {
+        out = value_error_from_cr(span, r);
+        goto done;
+    }
+
+    CR *n = fn(l, r);
+    if (cr_is_error(n))
+        out = value_error_from_cr(span, n);
+    else
+        out = value_real(span, fn(l, r));
+
+done:
     cr_release(&l);
     cr_release(&r);
     return out;

@@ -108,6 +108,7 @@ Value *value_lambda(const Expr *e, Scope *s);
 
 Value *value_errorf(Span span, const char *fmt, ...);
 Value *value_error_from_expr(const Expr *e);
+Value *value_error_from_cr(Span span, const CR *n);
 Value *value_error_undefined_op(const Value *l, const Expr *e, const Value *r);
 Value *value_error_expr_kind(const Expr *got, ExprKind want);
 Value *value_error_value_kind(const Value *got, ValueKind want);

@@ -315,3 +315,11 @@ TEST(real_render_correct)
         RENDER_EQ(sb, "~= 8.0000000000");
     END();
 }
+
+TEST(power_rejects_large_exponent)
+{
+    START();
+        EVAL_FAIL("2 ^ (2^64-1)");
+        EVAL_FAIL("2 `pow` 2 `pow` 32");
+    END();
+}

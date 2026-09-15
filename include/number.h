@@ -59,4 +59,9 @@ typedef enum
 void render_mpq_as_decimal(String *sb, const mpq_t n, int base, size_t max_digits);
 void render_mpfi(String *sb, const mpfi_t n, int base, size_t max_digits, OutputFormat fmt);
 
+#define RENDER_BITS_MAX 1e6
+
+double bit_estimate(double b, double x);
+double bit_estimate_mpq(const mpq_t b, const mpq_t x);
+
 #endif

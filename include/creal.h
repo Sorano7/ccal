@@ -4,6 +4,7 @@
 #include <gmp.h>
 #include <mpfr.h>
 #include <mpfi.h>
+#include "cut.h"
 
 #define PREC_DEFAULT 10
 
@@ -38,5 +39,8 @@ void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result);
 double cr_to_d(CR *n);
 
 bool cr_approx(CR *a, CR *b);
+
+bool cr_is_error(const CR *n);
+void cr_get_error(const CR *n, String *sb);
 
 #endif

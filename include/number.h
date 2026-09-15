@@ -57,6 +57,6 @@ typedef enum
 } OutputFormat;
 
 void render_mpq_as_decimal(String *sb, const mpq_t n, int base, size_t max_digits);
-void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_digits, OutputFormat fmt);
+void render_mpfi(String *sb, const mpfi_t n, int base, size_t max_digits, OutputFormat fmt);
 
 #endif

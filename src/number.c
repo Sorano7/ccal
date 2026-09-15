@@ -357,8 +357,15 @@ static void render_mpfr(String *sb, String *sexp, const mpfr_t n, int base, size
     mpfr_free_str(digits);
 }
 
-// Render a computable real as an interval.
-void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_digits, OutputFormat fmt)
+static bool intpart_equal(StringView a, StringView b)
+{
+    a = sv_split(&a, '.');
+    b = sv_split(&b, '.');
+    return sv_equal(a, b);
+}
+
+// Render a computable real.
+void render_mpfi(String *sb, const mpfi_t n, int base, size_t max_digits, OutputFormat fmt)
 {
     mpfr_prec_t prec = mpfi_get_prec(n);
     mpfr_t lo, hi;
@@ -371,14 +378,14 @@ void render_mpfi_as_interval(String *sb, const mpfi_t n, int base, size_t max_di
     str_init(&sba); str_init(&expa);
     str_init(&sbb); str_init(&expb);
 
-    render_mpfr(&sba, &expa, lo, base, max_digits, MPFR_RNDN, fmt);
+    render_mpfr(&sba, &expa, lo, base, max_digits, MPFR_RNDU, fmt);
     render_mpfr(&sbb, &expb, hi, base, max_digits, MPFR_RNDN, fmt);
 
     if (sba.len == 0 || sbb.len == 0)
     {
         str_append(sb, "?");
     }
-    else if (!sv_equal(expa, expb))
+    else if (!sv_equal(expa, expb) || !intpart_equal(SV(sba), SV(sbb)))
     {
         str_append(&sba, &expa);
         str_append(&sbb, &expb);

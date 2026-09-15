@@ -56,7 +56,7 @@ static int cr_sign(CR *n)
     double d = cr_to_d(n);
     if (APPROX_D(d, 0))
         return 0;
-    return d > 0;
+    return d > 0 ? 1 : -1;
 }
 
 // Allocate a new CR node.
@@ -177,7 +177,7 @@ CR *cr_exp(CR *x)
 CR *cr_ln(CR *x) 
 {
     if (cr_sign(x) <= 0)
-        return cr_error("Undefined logarithm");
+        return cr_error("Expected non-negative/non-zero operand");
     return cr_new_unary(CR_OP_LN, x);
 }
 

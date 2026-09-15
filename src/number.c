@@ -316,7 +316,7 @@ static void render_mpfr(String *sb, String *sexp, const mpfr_t n, int base, size
 
     if (mpfr_zero_p(n))
     {
-        str_append(sb, (sign < 0) ? "-0" : "0");
+        str_append(sb, "0");
         return;
     }
 

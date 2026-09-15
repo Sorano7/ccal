@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 - Display interval form when integer part diverges instead of truncating.
 - Prevent a crash/hang when computing/rendering astronomical values from `^` or `'pow`.
 
+### Changed
+- No longer renders -0.
+
 ## [1.0.0] - 2026-09-14
 
 ### Added

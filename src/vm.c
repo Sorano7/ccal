@@ -122,17 +122,39 @@ static Value *eval_prefix(VM *v, const Expr *e)
 // Evaluate one number raised to the power of the other.
 static Value *eval_exact_power(const Value *l, const Value *r)
 {
-    if (mpz_cmp_ui(mpq_denref(r->as.exact), 1) != 0)
-        return value_errorf(r->span, "Use <'pow> for non-integer exponents");
-
-    bool fit_ul = mpz_fits_ulong_p(mpq_numref(r->as.exact));
-    bool can_render = bit_estimate_mpq(l->as.exact, r->as.exact) < RENDER_BITS_MAX;
-
-    if (!fit_ul || !can_render)
-        return value_errorf(r->span, "Exponent too large");
-
+    Value *out = NULL;
     Span s = {l->span.from, r->span.to};
-    Value *out = value_exact(s, l->as.exact);
+
+    bool non_int = mpz_cmp_ui(mpq_denref(r->as.exact), 1) != 0;
+    bool fit_ul = false;
+    bool can_render = false;
+    if (!non_int)
+    {
+        fit_ul = mpz_fits_ulong_p(mpq_numref(r->as.exact));
+        can_render = bit_estimate_mpq(l->as.exact, r->as.exact) < RENDER_BITS_MAX;
+    }
+
+    if (non_int || !fit_ul || !can_render)
+    {
+        CR *b = cr_from_mpq(l->as.exact);
+        CR *x = cr_from_mpq(r->as.exact);
+        CR *n = cr_pow(b, x);
+        cr_release(&b);
+        cr_release(&x);
+
+        if (cr_is_error(n))
+        {
+            out = value_error_from_cr(r->span, n);
+            cr_release(&n);
+        }
+        else
+        {
+            out = value_real(s, n);
+        }
+        return out;
+    }
+
+    out = value_exact(s, l->as.exact);
 
     unsigned long exp = mpz_get_ui(mpq_numref(r->as.exact));
     mpz_pow_ui(mpq_numref(out->as.exact), mpq_numref(l->as.exact), exp);

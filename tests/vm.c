@@ -323,3 +323,14 @@ TEST(power_rejects_large_exponent)
         EVAL_FAIL("2 `pow` 2 `pow` 32");
     END();
 }
+
+TEST(power_converts_to_real)
+{
+    START();
+        EVAL("2 ^ 2");
+        NUM_EQ(val, 4, 1);
+
+        EVAL("2 ^ 0.5 ~= 2 `pow` 0.5");
+        BOOL_EQ(val, true);
+    END();
+}

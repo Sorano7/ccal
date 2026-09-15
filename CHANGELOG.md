@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 - Prevent a crash/hang when computing/rendering astronomical values from `^` or `'pow`.
 
 ### Changed
-- No longer renders -0.
+- No longer render zero with sign.
 
 ## [1.0.0] - 2026-09-14
 

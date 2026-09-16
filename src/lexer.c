@@ -49,7 +49,6 @@ static TokenKind token_kind_get(StringView src)
     switch (c)
     {
         case '+':  return TOK_PLUS;
-        case '-':  return TOK_MINUS;
         case '*':  return TOK_STAR;
         case '/':  return TOK_SLASH;
         case '^':  return TOK_CARET;
@@ -72,6 +71,9 @@ static TokenKind token_kind_get(StringView src)
 
         case ';':  return TOK_SEMICOLON;
         case '\n': return TOK_NEWLINE;
+
+        case '-':
+            return next == '-' ? TOK_DDASH : TOK_MINUS;
 
         case '=':
             return next == '=' ? TOK_EQ : TOK_ASSIGN;
@@ -105,6 +107,7 @@ static size_t token_len(TokenKind kind)
         case TOK_APPROX:
         case TOK_LEQ:
         case TOK_GEQ:
+        case TOK_DDASH:
             return 2;
 
         default:
@@ -242,6 +245,17 @@ static bool build_infix_id_token(Token *t, StringView src, size_t *pos)
     return true;
 }
 
+static void consume_comment(StringView src, size_t *pos)
+{
+    size_t i = 0;
+    for (; i < src.len; i++)
+    {
+        if (token_kind_get(SRC) == TOK_NEWLINE)
+            break;
+    }
+    *pos += i;
+}
+
 // Tokenize the source.
 bool tokenize(TokenList *tl, StringView src)
 {
@@ -280,6 +294,10 @@ bool tokenize(TokenList *tl, StringView src)
                 return false;
 
             case TOK_SPACE:
+                break;
+
+            case TOK_DDASH:
+                consume_comment(SRC, &i);
                 break;
 
             case TOK_DIGIT:

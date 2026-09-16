@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
+### Added
+- Comments with `--`. Subtraction operator now must be space-separated from negation.
+
 ### Changed
 - Lambda literal now must be inside parenthesis unless on the right of assignment or is lambda body.
 - Conditional now has shape `<if> ? <then> : <else>`.

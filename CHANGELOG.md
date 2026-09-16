@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
+### Changed
+- Lambda literal now must be inside parenthesis unless on the right of assignment or is lambda body.
+
 ### Fixed 
 - Lambda no longer suppress undefined symbol error.
 - Self-referential lambdas no longer leaks memory.

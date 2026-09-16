@@ -321,16 +321,6 @@ static Expr *parse_base_tag(Parser *p)
     return e;
 }
 
-// Parse a group expression.
-static Expr *parse_group(Parser *p)
-{
-    CONSUME_EXPECT(p, TOK_LPAREN);
-    Expr *e = parse_expr(p, PREC_PRIMARY);
-    if (is_error(e)) return e;
-    CONSUME_EXPECT(p, TOK_RPAREN);
-    return e;
-}
-
 // Parse a negation expression.
 static Expr *parse_neg(Parser *p)
 {
@@ -354,6 +344,15 @@ static Expr *parse_ident(Parser *p)
     return expr_id(t.span, SV(t.value));
 }
 
+static Expr *parse_lambda(Parser *p);
+
+static Expr *parse_lambda_or_expr(Parser *p, int prec)
+{
+    if (peek(p, 1).kind == TOK_COLON)
+        return parse_lambda(p);
+    return parse_expr(p, prec);
+}
+
 // Parse a lambda expression.
 static Expr *parse_lambda(Parser *p)
 {
@@ -362,10 +361,20 @@ static Expr *parse_lambda(Parser *p)
 
     CONSUME_EXPECT(p, TOK_COLON);
 
-    Expr *body = parse_expr(p, PREC_PRIMARY);
+    Expr *body = parse_lambda_or_expr(p, PREC_PRIMARY);
     if (is_error(body)) return body;
 
     return expr_lambda(id, body);
+}
+
+// Parse a group expression.
+static Expr *parse_group(Parser *p)
+{
+    CONSUME_EXPECT(p, TOK_LPAREN);
+    Expr *e = parse_lambda_or_expr(p, PREC_PRIMARY);
+    if (is_error(e)) return e;
+    CONSUME_EXPECT(p, TOK_RPAREN);
+    return e;
 }
 
 // Parse a null denotation expression.
@@ -373,9 +382,6 @@ static Expr *parse_nud(Parser *p)
 {
     if (peek(p, 1).kind == TOK_HASH)
         return parse_base_tag(p);
-
-    if (peek(p, 1).kind == TOK_COLON)
-        return parse_lambda(p);
 
     if (is_alnum(p))
         return parse_number(p, DIGIT_FMT_ALNUM);
@@ -388,7 +394,7 @@ static Expr *parse_nud(Parser *p)
         case TOK_ID:     return parse_ident(p);
         case TOK_LPAREN: return parse_group(p);
         case TOK_MINUS:  return parse_neg(p);
-        default:         return expr_err(tspan(p), "Expected expression");
+        default:         return expr_err(tspan(p), "Invalid expression");
     }
 }
 
@@ -470,7 +476,7 @@ static Expr *parse_led(Parser *p, int prec, Expr *left)
     if (is_right_associative(op))
         prec--;
 
-    Expr *right = parse_expr(p, prec);
+    Expr *right = parse_lambda_or_expr(p, prec);
     if (is_error(right))
     {
         expr_destroy(&left);

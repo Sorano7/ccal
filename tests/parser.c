@@ -376,7 +376,9 @@ TEST(parse_lambda_expression)
 {
     Expr *e = NULL;
 
-    PARSE(e, "'x : 'x + 1", 10);
+    PARSE_FAIL("'x: 'x", 10);
+
+    PARSE(e, "('x: 'x + 1)", 10);
     EXPR_CHECK(e,
         expr_lambda(
             expr_id((Span){0}, SV("x")),
@@ -387,7 +389,7 @@ TEST(parse_lambda_expression)
             )
         ));
 
-    PARSE(e, "'x : 'y : 'x + 'y", 10);
+    PARSE(e, "('x: 'y: 'x + 'y)", 10);
     EXPR_CHECK(e,
         expr_lambda(
             expr_id((Span){0}, SV("x")),

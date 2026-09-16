@@ -121,10 +121,17 @@ void expr_render(const Expr *e, String *sb);
 
 typedef struct
 {
-    Expr **data;
+    String src;
+    Expr *expr;
+} ModuleEntry;
+
+typedef struct
+{
+    ModuleEntry *data;
     size_t len, cap;
 } Module;
 
+void module_append(Module *m, Expr *e, StringView s);
 void module_free(Module *m);
 
 #endif

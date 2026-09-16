@@ -320,12 +320,22 @@ void expr_render(const Expr *e, String *sb)
     }
 }
 
+void module_append(Module *m, Expr *e, StringView s)
+{
+    ModuleEntry entry = {0};
+    entry.expr = e;
+    str_init_with(&entry.src, s);
+    da_append(m, entry);
+}
+
 void module_free(Module *m)
 {
     DA_FOR(m, i)
     {
-        Expr *e = da_at(m, i);
-        expr_destroy(&e);
+        ModuleEntry entry = da_at(m, i);
+        if (entry.expr)
+            expr_destroy(&entry.expr);
+        str_free(&entry.src);
     }
     da_free(m);
 }

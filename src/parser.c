@@ -509,27 +509,58 @@ static Expr *parse_expr(Parser *p, int prec)
     return e;
 }
 
-static bool skip_until_expr(Parser *p)
+static void collect_lines(SVList *lines, StringView src)
 {
-    bool end = false;
-    bool skipped_any = false;
-    for (;;)
+    while (src.len > 0)
     {
-        switch (tkind(p))
-        {
-            case TOK_NEWLINE:
-            case TOK_SEMICOLON:
-                skipped_any = true;
-                break;
+        StringView line = sv_split(&src, '\n');
+        da_append(lines, sv_trim(line));
+    }
+}
 
-            default:
-                end = true;
+static bool parse_line(Parser *p, StringView line, Module *m)
+{
+    Expr *e = NULL;
+
+    if (!tokenize(p->tl, line))
+    {
+        Token err = da_last(p->tl);
+        DEV_MUST(err.kind == TOK_ERROR);
+        e = expr_err(err.span, SV_FMT, SV_ARG(SV(err.value)));
+        module_append(m, e, line);
+        return false;
+    }
+
+    while (tkind(p) == TOK_SEMICOLON) p->pos++;
+
+    while (tkind(p) != TOK_EOF)
+    {
+        e = parse_expr(p, PREC_PRIMARY);
+        module_append(m, e, line);
+        if (is_error(e)) return false;
+
+        if (tkind(p) == TOK_SEMICOLON)
+        {
+            while (tkind(p) == TOK_SEMICOLON) p->pos++;
+            continue;
+        }
+        else
+        {
+            if (tkind(p) != TOK_EOF)
                 break;
         }
-        if (end) break;
-        p->pos++;
     }
-    return skipped_any;
+
+    if (tkind(p) != TOK_EOF)
+    {
+        e = expr_err(tspan(p), "Trailing characters");
+        module_append(m, e, line);
+        return false;
+    }
+
+    token_list_reset(p->tl);
+    p->pos = 0;
+    return true;
 }
 
 // Parse a module.
@@ -541,53 +572,24 @@ bool parse_module(StringView src, unsigned long base, Module *m)
 
     bool ok = true;
 
+    SVList lines;
+    da_init(&lines);
+    collect_lines(&lines, src);
+    if (lines.len == 0)
+        return expr_err(s, "Empty expression");
+
     TokenList tl = {0};
     da_init(&tl);
 
-    Expr *e = NULL;
+    Parser p = {&tl, 0, base};
 
-    if (!tokenize(&tl, src))
+    for (size_t i = 0; i < lines.len; i++)
     {
-        Token err = da_last(&tl);
-        if (err.kind == TOK_ERROR)
-        {
-            e = expr_err(err.span, SV_FMT, SV_ARG(SV(err.value)));
-            da_append(m, e);
-        }
-        ok = false;
-        goto cleanup;
+        if (!parse_line(&p, da_at(&lines, i), m))
+            break;
     }
 
-    Parser p = {
-        .tl = &tl,
-        .pos = 0,
-        .base = base,
-    };
-
-    for (;;)
-    {
-        skip_until_expr(&p);
-        if (tkind(&p) == TOK_EOF) break;
-
-        e = parse_expr(&p, PREC_PRIMARY);
-        da_append(m, e);
-
-        if (is_error(e))
-        {
-            ok = false;
-            goto cleanup;
-        }
-
-        if (!skip_until_expr(&p) && tkind(&p) != TOK_EOF)
-        {
-            e = expr_err(tspan(&p), "Trailing characters");
-            da_append(m, e);
-            ok = false;
-            goto cleanup;
-        }
-    }
-
-cleanup:
+    da_free(&lines);
     token_list_free(&tl);
     return ok;
 }
@@ -600,7 +602,8 @@ Expr *parse(StringView src, unsigned long base)
 
     parse_module(src, base, &m);
 
-    Expr *e = expr_clone(da_last(&m));
+    ModuleEntry last = da_last(&m);
+    Expr *e = expr_clone(last.expr);
     module_free(&m);
     return e;
 }

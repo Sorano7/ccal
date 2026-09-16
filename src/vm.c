@@ -646,35 +646,57 @@ Value *vm_eval_expr(VM *v, const Expr *e)
     return out;
 }
 
-// Run and evaluate a source.
-Value *vm_run(VM *v, StringView src)
+static Value *vm_run_module(VM *v, StringView src, Module *m)
 {
     Value *out = NULL;
 
-    Module m;
-    da_init(&m);
-
-    if (!parse_module(src, v->base, &m))
+    if (!parse_module(src, v->base, m))
     {
-        out = value_error_from_expr(da_last(&m));
-        goto cleanup;
+        ModuleEntry err = da_last(m);
+        return value_error_from_expr(err.expr);
     }
 
-    DA_FOR(&m, i)
+    DA_FOR(m, i)
     {
-        const Expr *e = da_at(&m, i);
+        ModuleEntry entry = da_at(m, i);
+        const Expr *e = entry.expr;
+
         out = vm_eval_expr(v, e);
         if (value_is_err(out))
-            goto cleanup;
+            return out;
 
         if (v->last) value_release(&v->last);
         v->last = value_retain(out);
 
-        if (i < m.len-1)
+        if (i < m->len-1)
             value_release(&out);
     }
+    return out;
+}
 
-cleanup:
+Value *vm_run_render(VM *v, StringView src, String *sb, RenderCtx *ctx)
+{
+    Module m;
+    da_init(&m);
+
+    Value *out = vm_run_module(v, src, &m);
+    ModuleEntry last = da_last(&m);
+
+    ctx->src = SV(last.src);
+    value_render(out, sb, ctx);
+
+    module_free(&m);
+    return out;
+}
+
+// Run and evaluate a source.
+Value *vm_run(VM *v, StringView src)
+{
+    Module m;
+    da_init(&m);
+
+    Value *out = vm_run_module(v, src, &m);
+
     module_free(&m);
     return out;
 }

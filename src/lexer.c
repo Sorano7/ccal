@@ -28,13 +28,18 @@ Operator token_to_op(Token t)
     }
 }
 
+void token_list_reset(TokenList *tl)
+{
+    DA_FOR(tl, i)
+        str_free(&da_at(tl, i).value);
+    da_reset(tl);
+}
+
 // Free a list of tokens and all of its contents.
 void token_list_free(TokenList *tl)
 {
     DA_FOR(tl, i)
-    {
         str_free(&da_at(tl, i).value);
-    }
     da_free(tl);
 }
 

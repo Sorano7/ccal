@@ -239,16 +239,18 @@ void repl_start(VM *vm, RenderCtx *ctx)
             line = readline(prompt);
             if (!line) goto exit;
 
+            prompt = "..... ";
+
             StringView part = sv_trim(SV(line));
             if (part.len == 0) break;
 
             str_append(&in, part);
             free(line);
 
-            if (!sv_endswith(SV(in), SV(";")))
-                break;
+            if (sv_endswith(SV(in), SV(";")))
+                continue;
 
-            prompt = "..... ";
+            break;
         }
 
         if (in.len == 0) continue;
@@ -266,11 +268,9 @@ void repl_start(VM *vm, RenderCtx *ctx)
             continue;
         }
 
-        Value *result = vm_run(vm, src);
-
-        ctx->src = src;
-        value_render(result, &out, ctx);
+        Value *result = vm_run_render(vm, src, &out, ctx);
         printf(SV_FMT"\n", SV_ARG(SV(out)));
+        value_release(&result);
 
         str_reset(&out);
         str_reset(&in);

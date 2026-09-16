@@ -213,6 +213,26 @@ TEST(lambda_call_eval)
     END();
 }
 
+TEST(lambda_capture_by_value)
+{
+    START();
+        EVAL("'foo = 100; ('x: 'foo + 'x) 1");
+        NUM_EQ(val, 101, 1);
+
+        EVAL("'foo = 100; 'bar = 'x: 'foo + 'x; 'foo = 200");
+        EVAL("'bar 1");
+        NUM_EQ(val, 101, 1);
+    END();
+}
+
+TEST(lambda_rejects_undefined_symbol)
+{
+    START();
+        EVAL_FAIL("('x: 'y)");
+        EVAL("('x: ('y = 'x))");
+    END();
+}
+
 TEST(conditional_eval)
 {
     START();
@@ -230,15 +250,21 @@ TEST(conditional_eval)
 TEST(recursion_eval)
 {
     START();
-        EVAL("'fact = 'n: 'n == 0 ? 1 | 'n * 'fact ('n - 1)");
-
-        EVAL("'fact 0");
+        EVAL("'f = 'n: 'n == 0 ? 1 | 'n * 'f ('n - 1)");
+        EVAL("'f 0");
         NUM_EQ(val, 1, 1);
-
-        EVAL("'fact 2");
+        EVAL("'f 2");
         NUM_EQ(val, 2, 1);
+        EVAL("'f 5");
+        NUM_EQ(val, 120, 1);
 
-        EVAL("'fact 5");
+        // alias
+        EVAL("'g = 'f; 'g 5");
+        NUM_EQ(val, 120, 1);
+
+        // inner recursion
+        EVAL("'foo = 'x: ('g = 'n: 'n == 0 ? 1 | 'n * 'g ('n - 1)) 'x");
+        EVAL("'foo 5");
         NUM_EQ(val, 120, 1);
     END();
 }

@@ -14,7 +14,7 @@ void vm_init(VM *v)
 // Reset the state of a VM.
 void vm_reset(VM *v)
 {
-    scope_release_r(v->scope);
+    scope_release_r(&v->scope);
     v->scope = scope_from(NULL);
     if (v->last) value_release(&v->last);
     v->last = NULL;
@@ -24,7 +24,7 @@ void vm_reset(VM *v)
 // Free a VM.
 void vm_free(VM *v)
 {
-    scope_release_r(v->scope);
+    scope_release_r(&v->scope);
     if (v->last) value_release(&v->last);
 }
 
@@ -72,46 +72,237 @@ static Value *eval_ident(VM *v, const Expr *e)
     return out;
 }
 
-// Evaluate a prefix expression.
-static Value *eval_prefix(VM *v, const Expr *e)
+#define ENSURE_CAPTURE(expr) do { \
+    Value *err = capture_free_vars(v, (expr), s, params); \
+    if (err) return err; \
+} while (0)
+
+// Capture free variables from the current scope that are no shadowed by params.
+// Return error or null.
+static Value *capture_free_vars(VM *v, const Expr *e, Scope *s, SVList *params)
 {
-    Value *out = vm_eval_expr(v, e->as.prefix.expr);
-    if (value_is_err(out)) return out;
-
-    switch (out->kind)
+    switch (e->kind)
     {
-        case VAL_EXACT:
-            switch (e->as.prefix.op)
-            {
-                case OP_NEG:
-                    mpq_neg(out->as.exact, out->as.exact);
-                    return out;
+        case EXPR_IDENT:
+            if (svlist_contains(params, SV(e->as.id)))
+                break;
+            if (builtin_kind(e) != BUILTIN_NONE)
+                break;
 
-                default:
-                    break;
-            }
+            Value *capture = scope_get_symbol(v->scope, SV(e->as.id));
+            if (capture)
+                scope_set_symbol(s, SV(e->as.id), capture);
+            else
+                return value_errorf(e->span, "Undefined symbol");
             break;
 
-        case VAL_REAL:
-            switch (e->as.prefix.op)
-            {
-                case OP_NEG:
-                    out->as.real = cr_neg(out->as.real);
-                    return out;
+        case EXPR_INFIX:
+            if (e->as.infix.op == OP_ASSIGN && e->as.infix.left->kind == EXPR_IDENT)
+                da_append(params, SV(e->as.infix.left->as.id));
 
-                default:
-                    break;
-            }
+            ENSURE_CAPTURE(e->as.infix.left);
+            ENSURE_CAPTURE(e->as.infix.right);
+            break;
+
+        case EXPR_PREFIX:
+            ENSURE_CAPTURE(e->as.prefix.expr);
+            break;
+
+        case EXPR_LAMBDA:
+            if (e->as.lambda.param->kind == EXPR_IDENT)
+                da_append(params, SV(e->as.lambda.param->as.id));
+            ENSURE_CAPTURE(e->as.lambda.body);
+            break;
+
+        case EXPR_COND:
+            ENSURE_CAPTURE(e->as.cond.if_);
+            ENSURE_CAPTURE(e->as.cond.then);
+            ENSURE_CAPTURE(e->as.cond.else_);
+            break;
+
+        case EXPR_ERROR:
+        case EXPR_NUMBER:
             break;
 
         default:
-            break;
+            UNREACHABLE();
+    }
+    return NULL;
+}
+
+// Evaluate a lambda expression.
+static Value *eval_lambda(VM *v, const Expr *e, StringView name)
+{
+    SVList p;
+    da_init(&p);
+    Scope *s = scope_from(NULL);
+    if (e->as.lambda.param->kind == EXPR_IDENT)
+        da_append(&p, SV(e->as.lambda.param->as.id));
+
+    if (name.len > 0)
+    {
+        da_append(&p, name);
+        scope_set_symbol(s, name, NULL);
     }
 
-    Value *err = value_error_undefined_op(NULL, e, out);
-    value_release(&out);
-    return err;
+    Value *err = capture_free_vars(v, e->as.lambda.body, s, &p);
+    if (err)
+    {
+        da_free(&p);
+        scope_release(&s);
+        return err;
+    }
+
+    Value *out = value_lambda(e, s);
+    out->refcount--;
+    scope_set_symbol(s, name, out);
+    da_free(&p);
+    return out;
 }
+
+// Evaluate a lambda application.
+static Value *eval_lambda_apply(VM *v, const Value *f, Value *arg)
+{
+    Scope *s = scope_from(f->as.lambda.env);
+    Scope *prev = v->scope;
+    v->scope = s;
+
+    const Expr *func = f->as.lambda.expr;
+    if (func->as.lambda.param->kind == EXPR_IDENT)
+        scope_set_symbol(v->scope, SV(func->as.lambda.param->as.id), arg);
+    Value *out = vm_eval_expr(v, func->as.lambda.body);
+    out->span = f->span;
+
+    v->scope = prev;
+    scope_release(&s);
+    return out;
+}
+
+// Evaluate a builtin bool application.
+static Value *eval_builtin_bool(Value *f, Value *arg)
+{
+    if (!value_to_bool(f)) return value_retain(arg);
+    return value_retain(da_at(&f->as.builtin.args, 0));
+}
+
+#define AS_REAL(val, cr) do { \
+    switch ((val)->kind) { \
+        case VAL_REAL:  (cr) = cr_retain((val)->as.real);    break; \
+        case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
+        default:        return value_error_value_kind_s(val, SV("number")); break; \
+    } \
+} while (0)
+
+// Evaluate a builtin unary function on real values.
+static Value *eval_builtin_real_unary(CRUnary fn, const Value *arg)
+{
+    CR *x = NULL;
+    AS_REAL(arg, x);
+
+    Value *out = NULL;
+    if (cr_is_error(x))
+    {
+        out = value_error_from_cr(arg->span, x);
+    }
+    else
+    {
+        CR *n = fn(x);
+        if (cr_is_error(n))
+            out = value_error_from_cr(arg->span, n);
+        else
+            out = value_real(arg->span, fn(x));
+    }
+
+    cr_release(&x);
+    return out;
+}
+
+// Evaluate a builtin binary function on real values.
+static Value *eval_builtin_real_binary(const Value *f, CRBinary fn, const Value *right)
+{
+    Value *left = da_at(&f->as.builtin.args, 0);
+
+    Value *out = NULL;
+    Span span = {left->span.from, right->span.to};
+
+    CR *l = NULL, *r = NULL;
+    AS_REAL(left, l);
+    if (cr_is_error(l))
+    {
+        out = value_error_from_cr(span, l);
+        goto done;
+    }
+    AS_REAL(right, r);
+    if (cr_is_error(r))
+    {
+        out = value_error_from_cr(span, r);
+        goto done;
+    }
+
+    CR *n = fn(l, r);
+    if (cr_is_error(n))
+        out = value_error_from_cr(span, n);
+    else
+        out = value_real(span, fn(l, r));
+
+done:
+    cr_release(&l);
+    cr_release(&r);
+    return out;
+}
+
+// Evaluate builtin application.
+static Value *eval_builtin_apply(Value *f, Value *arg)
+{
+    if (f->as.builtin.args.len + 1 < f->as.builtin.arity)
+    {
+        da_append(&f->as.builtin.args, value_retain(arg));
+        return value_retain(f);
+    }
+
+    switch (f->as.builtin.kind)
+    {
+        case BUILTIN_TRUE:
+        case BUILTIN_FALSE: return eval_builtin_bool(f, arg);
+        case BUILTIN_SQRT:  return eval_builtin_real_unary(cr_sqrt, arg);
+        case BUILTIN_EXP:   return eval_builtin_real_unary(cr_exp, arg);
+        case BUILTIN_LN:    return eval_builtin_real_unary(cr_ln, arg);
+        case BUILTIN_POW:   return eval_builtin_real_binary(f, cr_pow, arg);
+        case BUILTIN_LOG:   return eval_builtin_real_binary(f, cr_log, arg);
+
+        case BUILTIN_HOLE:  return value_error_value_kind_s(f, SV("lambda"));
+        case BUILTIN_ANS:
+        default:            UNREACHABLE();
+    }
+}
+
+// Evaluate an application expression.
+static Value *eval_apply(VM *v, const Expr *f, const Expr *a)
+{
+    Value *func = vm_eval_expr(v, f);
+    if (value_is_err(func)) return func;
+
+    Value *arg = vm_eval_expr(v, a);
+    if (value_is_err(arg))
+    {
+        value_release(&func);
+        return arg;
+    }
+
+    Value *out = NULL;
+
+    switch (func->kind)
+    {
+        case VAL_LAMBDA:  out = eval_lambda_apply(v, func, arg);  break;
+        case VAL_BUILTIN: out = eval_builtin_apply(func, arg);    break;
+        default:          out = value_error_value_kind(func, VAL_LAMBDA); break;
+    }
+
+    value_release(&func);
+    value_release(&arg);
+    return out;
+}
+
 
 // Perform an mpq infix operation on two numbers wrapped in value.
 #define MPQ_INFIX(f, out, l, r) f((out)->as.exact, (l)->as.exact, (r)->as.exact)
@@ -295,158 +486,17 @@ static Value *eval_assign_infix(VM *v, const Expr *e)
     if (builtin != BUILTIN_NONE && builtin != BUILTIN_HOLE)
         return value_errorf(l->span, "Cannot assign to builtin identifier");
 
-    Value *out = vm_eval_expr(v, e->as.infix.right);
+    Value *out = NULL;
+    if (e->as.infix.right->kind == EXPR_LAMBDA)
+        out = eval_lambda(v, e->as.infix.right, SV(l->as.id));
+    else
+        out = vm_eval_expr(v, e->as.infix.right);
+
     if (value_is_err(out)) return out;
 
     if (builtin != BUILTIN_HOLE)
-    {
-        if (out->kind == VAL_LAMBDA)
-            scope_set_symbol(out->as.lambda.env, SV(l->as.id), out);
         scope_set_symbol(v->scope, SV(l->as.id), out);
-    }
-    return out;
-}
 
-// Evaluate a lambda application.
-static Value *eval_lambda_apply(VM *v, const Value *f, Value *arg)
-{
-    Scope *s = scope_from(f->as.lambda.env);
-    Scope *prev = v->scope;
-    v->scope = s;
-
-    const Expr *func = f->as.lambda.expr;
-    if (func->as.lambda.param->kind == EXPR_IDENT)
-        scope_set_symbol(v->scope, SV(func->as.lambda.param->as.id), arg);
-    Value *out = vm_eval_expr(v, func->as.lambda.body);
-    out->span = (Span){f->span.from, arg->span.to};
-
-    v->scope = prev;
-    scope_release(s);
-    return out;
-}
-
-// Evaluate a builtin bool application.
-static Value *eval_builtin_bool(Value *f, Value *arg)
-{
-    if (!value_to_bool(f)) return value_retain(arg);
-    return value_retain(da_at(&f->as.builtin.args, 0));
-}
-
-#define AS_REAL(val, cr) do { \
-    switch ((val)->kind) { \
-        case VAL_REAL:  (cr) = cr_retain((val)->as.real);    break; \
-        case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
-        default:        return value_error_value_kind_s(val, SV("number")); break; \
-    } \
-} while (0)
-
-// Evaluate a builtin unary function on real values.
-static Value *eval_builtin_real_unary(CRUnary fn, const Value *arg)
-{
-    CR *x = NULL;
-    AS_REAL(arg, x);
-
-    Value *out = NULL;
-    if (cr_is_error(x))
-    {
-        out = value_error_from_cr(arg->span, x);
-    }
-    else
-    {
-        CR *n = fn(x);
-        if (cr_is_error(n))
-            out = value_error_from_cr(arg->span, n);
-        else
-            out = value_real(arg->span, fn(x));
-    }
-
-    cr_release(&x);
-    return out;
-}
-
-// Evaluate a builtin binary function on real values.
-static Value *eval_builtin_real_binary(const Value *f, CRBinary fn, const Value *right)
-{
-    Value *left = da_at(&f->as.builtin.args, 0);
-
-    Value *out = NULL;
-    Span span = {left->span.from, right->span.to};
-
-    CR *l = NULL, *r = NULL;
-    AS_REAL(left, l);
-    if (cr_is_error(l))
-    {
-        out = value_error_from_cr(span, l);
-        goto done;
-    }
-    AS_REAL(right, r);
-    if (cr_is_error(r))
-    {
-        out = value_error_from_cr(span, r);
-        goto done;
-    }
-
-    CR *n = fn(l, r);
-    if (cr_is_error(n))
-        out = value_error_from_cr(span, n);
-    else
-        out = value_real(span, fn(l, r));
-
-done:
-    cr_release(&l);
-    cr_release(&r);
-    return out;
-}
-
-// Evaluate builtin application.
-static Value *eval_builtin_apply(Value *f, Value *arg)
-{
-    if (f->as.builtin.args.len + 1 < f->as.builtin.arity)
-    {
-        da_append(&f->as.builtin.args, value_retain(arg));
-        return value_retain(f);
-    }
-
-    switch (f->as.builtin.kind)
-    {
-        case BUILTIN_TRUE:
-        case BUILTIN_FALSE: return eval_builtin_bool(f, arg);
-        case BUILTIN_SQRT:  return eval_builtin_real_unary(cr_sqrt, arg);
-        case BUILTIN_EXP:   return eval_builtin_real_unary(cr_exp, arg);
-        case BUILTIN_LN:    return eval_builtin_real_unary(cr_ln, arg);
-        case BUILTIN_POW:   return eval_builtin_real_binary(f, cr_pow, arg);
-        case BUILTIN_LOG:   return eval_builtin_real_binary(f, cr_log, arg);
-
-        case BUILTIN_HOLE:  return value_error_value_kind_s(f, SV("lambda"));
-        case BUILTIN_ANS:
-        default:            UNREACHABLE();
-    }
-}
-
-// Evaluate an application expression.
-static Value *eval_apply(VM *v, const Expr *f, const Expr *a)
-{
-    Value *func = vm_eval_expr(v, f);
-    if (value_is_err(func)) return func;
-
-    Value *arg = vm_eval_expr(v, a);
-    if (value_is_err(arg))
-    {
-        value_release(&func);
-        return arg;
-    }
-
-    Value *out = NULL;
-
-    switch (func->kind)
-    {
-        case VAL_LAMBDA:  out = eval_lambda_apply(v, func, arg);  break;
-        case VAL_BUILTIN: out = eval_builtin_apply(func, arg);    break;
-        default:          out = value_error_value_kind(func, VAL_LAMBDA); break;
-    }
-
-    value_release(&func);
-    value_release(&arg);
     return out;
 }
 
@@ -512,51 +562,45 @@ static Value *eval_infix(VM *v, const Expr *e)
     return out;
 }
 
-// Capture free variables from the current scope that are no shadowed by params.
-static void capture_free_vars(VM *v, const Expr *e, Scope *s)
+// Evaluate a prefix expression.
+static Value *eval_prefix(VM *v, const Expr *e)
 {
-    switch (e->kind)
+    Value *out = vm_eval_expr(v, e->as.prefix.expr);
+    if (value_is_err(out)) return out;
+
+    switch (out->kind)
     {
-        case EXPR_IDENT:
-            Value *capture = scope_get_symbol(v->scope, SV(e->as.id));
-            if (capture)
-                scope_set_symbol(s, SV(e->as.id), capture);
+        case VAL_EXACT:
+            switch (e->as.prefix.op)
+            {
+                case OP_NEG:
+                    mpq_neg(out->as.exact, out->as.exact);
+                    return out;
+
+                default:
+                    break;
+            }
             break;
 
-        case EXPR_INFIX:
-            capture_free_vars(v, e->as.infix.left, s);
-            capture_free_vars(v, e->as.infix.right, s);
-            break;
+        case VAL_REAL:
+            switch (e->as.prefix.op)
+            {
+                case OP_NEG:
+                    out->as.real = cr_neg(out->as.real);
+                    return out;
 
-        case EXPR_PREFIX:
-            capture_free_vars(v, e->as.prefix.expr, s);
-            break;
-
-        case EXPR_LAMBDA:
-            capture_free_vars(v, e->as.lambda.body, s);
-            break;
-
-        case EXPR_COND:
-            capture_free_vars(v, e->as.cond.if_, s);
-            capture_free_vars(v, e->as.cond.then, s);
-            capture_free_vars(v, e->as.cond.else_, s);
-            break;
-
-        case EXPR_ERROR:
-        case EXPR_NUMBER:
+                default:
+                    break;
+            }
             break;
 
         default:
-            UNREACHABLE();
+            break;
     }
-}
 
-// Evaluate a lambda expression.
-static Value *eval_lambda(VM *v, const Expr *e)
-{
-    Scope *s = scope_from(NULL);
-    capture_free_vars(v, e->as.lambda.body, s);
-    return value_lambda(e, s);
+    Value *err = value_error_undefined_op(NULL, e, out);
+    value_release(&out);
+    return err;
 }
 
 // Evaluate a conditional expression.
@@ -590,12 +634,12 @@ Value *vm_eval_expr(VM *v, const Expr *e)
 
     switch (e->kind)
     {
-        case EXPR_NUMBER: out = eval_number(e);    break;
-        case EXPR_IDENT:  out = eval_ident(v, e);  break;
-        case EXPR_INFIX:  out = eval_infix(v, e);  break;
-        case EXPR_PREFIX: out = eval_prefix(v, e); break;
-        case EXPR_LAMBDA: out = eval_lambda(v, e); break;
-        case EXPR_COND:   out = eval_cond(v, e);   break;
+        case EXPR_NUMBER: out = eval_number(e);            break;
+        case EXPR_IDENT:  out = eval_ident(v, e);          break;
+        case EXPR_INFIX:  out = eval_infix(v, e);          break;
+        case EXPR_PREFIX: out = eval_prefix(v, e);         break;
+        case EXPR_LAMBDA: out = eval_lambda(v, e, SV("")); break;
+        case EXPR_COND:   out = eval_cond(v, e);           break;
         default:          UNREACHABLE();
     }
     DEV_MUST(out);

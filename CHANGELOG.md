@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
+### Fixed 
+- Lambda no longer suppress undefined symbol error.
+- Self-referential lambdas no longer leaks memory.
+
+
 ## [1.1.0] - 2026-09-15
 
 ### Added
@@ -17,6 +22,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Changed
 - No longer render zero with sign.
+
 
 ## [1.0.0] - 2026-09-14
 

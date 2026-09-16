@@ -79,7 +79,7 @@ typedef struct Value
 
     Span span;
     ValueKind kind;
-    size_t refcount;
+    int refcount;
 } Value;
 
 // A symbol to value binding.
@@ -95,7 +95,7 @@ typedef struct Scope
     Symbol *data;
     size_t len;
     size_t cap;
-    size_t refcount;
+    int refcount;
     struct Scope *parent;
 } Scope;
 
@@ -115,7 +115,6 @@ Value *value_error_value_kind(const Value *got, ValueKind want);
 Value *value_error_value_kind_s(const Value *got, StringView want);
 
 Value *value_retain(Value *from);
-Value *value_clone(const Value *from);
 void value_release(Value **vp);
 
 #define value_is_err(v) (!v || v->kind == VAL_ERROR)
@@ -125,9 +124,10 @@ bool value_to_bool(const Value *v);
 
 BuiltinKind builtin_kind(const Expr *e);
 
-void scope_release(Scope *s);
-void scope_release_r(Scope *s);
+void scope_release(Scope **sp);
+void scope_release_r(Scope **sp);
 Scope *scope_from(Scope *parent);
+Scope *scope_retain(Scope *s);
 
 void scope_set_symbol(Scope *scope, StringView id, Value *value);
 Value *scope_get_symbol(Scope *scope, StringView id);

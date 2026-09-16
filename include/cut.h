@@ -136,6 +136,7 @@ bool _sv_equal(StringView a, StringView b);
 #define SV_ARG(s) ((int)(s).len), ((s).data)
 
 #define str_append_null(s) do { \
+    da_grow(s); \
     (s)->data[(s)->len] = '\0'; \
 } while (0)
 
@@ -240,6 +241,7 @@ typedef struct
 } SVList;
 
 void svlist_join(SVList *sv, String *sb, StringView delim);
+bool svlist_contains(SVList *sl, StringView v);
 
 /************************************************
  * Logging
@@ -899,6 +901,14 @@ void svlist_join(SVList *sv, String *sb, StringView delim)
         if (i < sv->len-1)
             str_appendf(sb, SV_FMT, SV_ARG(delim));
     }
+}
+
+bool svlist_contains(SVList *sl, StringView v)
+{
+    DA_FOR(sl, i)
+        if (sv_equal(da_at(sl, i), v)) return true;
+
+    return false;
 }
 
 // Format the string list into a whitespace-separated string.

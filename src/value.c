@@ -60,7 +60,6 @@ Value *value_lambda(const Expr *e, Scope *s)
     Value *v = value_new(VAL_LAMBDA, e->span);
     v->as.lambda.expr = expr_clone(e);
     v->as.lambda.env = s;
-    s->refcount++;
     return v;
 }
 
@@ -127,52 +126,12 @@ Value *value_retain(Value *from)
     return from;
 }
 
-Value *value_clone(const Value *from)
-{
-    DEV_MUST("value_clone is not deep clone");
-    Value *v = NULL;
-    switch (from->kind)
-    {
-        case VAL_VOID:
-            v = value_new(VAL_VOID, from->span);
-            break;
-
-        case VAL_EXACT:
-            v = value_exact(from->span, from->as.exact);
-            break;
-
-        case VAL_ERROR:
-            v = value_errorf(from->span, SV_FMT, SV_ARG(SV(from->as.error)));
-            break;
-
-        case VAL_REAL:
-            v = value_real(from->span, cr_retain(from->as.real));
-            break;
-
-        case VAL_LAMBDA:
-            v = value_lambda(from->as.lambda.expr, v->as.lambda.env);
-            break;
-
-        case VAL_BUILTIN:
-            v = value_builtin(from->span, from->as.builtin.kind, from->as.builtin.arity);
-            DA_FOR(&from->as.builtin.args, i)
-            {
-                Value *v = da_at(&from->as.builtin.args, i);
-                da_append(&v->as.builtin.args, value_retain(v));
-            }
-            break;
-
-        default:
-            UNREACHABLE();
-    }
-    return v;
-}
-
 void value_release(Value **vp)
 {
     if (!vp || !*vp) return;
     Value *v = *vp;
-    if (!v || --v->refcount > 0) return;
+    if (v->refcount <= 0) return;
+    if (--v->refcount > 0) return;
 
     switch (v->kind)
     {
@@ -190,7 +149,7 @@ void value_release(Value **vp)
 
         case VAL_LAMBDA:
             expr_destroy(&v->as.lambda.expr);
-            scope_release(v->as.lambda.env);
+            scope_release(&v->as.lambda.env);
             break;
 
         case VAL_BUILTIN:
@@ -260,30 +219,40 @@ BuiltinKind builtin_kind(const Expr *e)
 }
 
 // Free a scope and all of its symbols.
-void scope_release(Scope *s)
+void scope_release(Scope **sp)
 {
+    if (!sp || !*sp) return;
+
+    Scope *s = *sp;
+    if (s->refcount <= 0) return;
     if (--s->refcount > 0) return;
 
     DA_FOR(s, i)
     {
         Symbol sym = da_at(s, i);
-        str_free(sym.id);
-        free(sym.id);
+        if (sym.id)
+        {
+            str_free(sym.id);
+            free(sym.id);
+            da_at(s, i).id = NULL;
+        }
         value_release(&sym.value);
     }
     da_free(s);
+
+    if (s->parent)
+        s->parent->refcount--;
+
     free(s);
 }
 
 // Recursively free a scope.
-void scope_release_r(Scope *s)
+void scope_release_r(Scope **sp)
 {
-    while (s)
-    {
-        Scope *next = s->parent;
-        scope_release(s);
-        s = next;
-    }
+    if (!sp || !*sp) return;
+    Scope *s = *sp;
+    scope_release_r(&s->parent);
+    scope_release(&s);
 }
 
 // Create a new scope from a parent.
@@ -291,27 +260,41 @@ Scope *scope_from(Scope *parent)
 {
     Scope *s = malloc(sizeof(Scope));
     da_init(s);
-    s->parent = parent;
+    s->parent = scope_retain(parent);
     s->refcount = 1;
+    return s;
+}
+
+Scope *scope_retain(Scope *s)
+{
+    Scope *n = s;
+    while (n)
+    {
+        n->refcount++;
+        n = n->parent;
+    }
     return s;
 }
 
 // Assign a symbol to the scope.
 void scope_set_symbol(Scope *scope, StringView id, Value *value)
 {
-    if (!value) return;
-
-    Value *new_value = value_retain(value);
-    DA_FOR(scope, i)
+    Value *new_value = NULL;
+    if (value)
     {
-        Symbol *existing = &da_at(scope, i);
-        if (sv_equal(existing->id, id))
+        new_value = value_retain(value);
+        DA_FOR(scope, i)
         {
-            value_release(&existing->value);
-            existing->value = new_value;
-            return;
+            Symbol *existing = &da_at(scope, i);
+            if (sv_equal(existing->id, id))
+            {
+                value_release(&existing->value);
+                existing->value = new_value;
+                return;
+            }
         }
     }
+
     Symbol s = {0};
     s.id = malloc(sizeof(String));
     str_init_with(s.id, id);
@@ -422,16 +405,6 @@ static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
     }
 
     if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-}
-
-static bool svlist_contains(SVList *sl, StringView v)
-{
-    DA_FOR(sl, i)
-    {
-        if (sv_equal(da_at(sl, i), v))
-            return true;
-    }
-    return false;
 }
 
 // Render an expression with identifiers substituted.

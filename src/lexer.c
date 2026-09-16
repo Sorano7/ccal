@@ -247,12 +247,26 @@ static bool build_infix_id_token(Token *t, StringView src, size_t *pos)
 
 static void consume_comment(StringView src, size_t *pos)
 {
-    size_t i = 0;
+    size_t i = 1;
+    bool end = false;
     for (; i < src.len; i++)
     {
-        TokenKind tk = token_kind_get(SRC);
-        if (tk == TOK_NEWLINE || tk == TOK_SEMICOLON)
-            break;
+        TokenKind kind = token_kind_get(SRC);
+        switch (kind)
+        {
+            case TOK_NEWLINE:
+                end = true;
+                break;
+
+            case TOK_DDASH:
+                end = true;
+                i += token_len(kind);
+                break;
+
+            default:
+                break;
+        }
+        if (end) break;
     }
     *pos += i;
 }

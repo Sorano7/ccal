@@ -509,6 +509,29 @@ static Expr *parse_expr(Parser *p, int prec)
     return e;
 }
 
+static bool skip_until_expr(Parser *p)
+{
+    bool end = false;
+    bool skipped_any = false;
+    for (;;)
+    {
+        switch (tkind(p))
+        {
+            case TOK_NEWLINE:
+            case TOK_SEMICOLON:
+                skipped_any = true;
+                break;
+
+            default:
+                end = true;
+                break;
+        }
+        if (end) break;
+        p->pos++;
+    }
+    return skipped_any;
+}
+
 // Parse a module.
 bool parse_module(StringView src, unsigned long base, Module *m)
 {
@@ -543,6 +566,9 @@ bool parse_module(StringView src, unsigned long base, Module *m)
 
     for (;;)
     {
+        skip_until_expr(&p);
+        if (tkind(&p) == TOK_EOF) break;
+
         e = parse_expr(&p, PREC_PRIMARY);
         da_append(m, e);
 
@@ -552,19 +578,13 @@ bool parse_module(StringView src, unsigned long base, Module *m)
             goto cleanup;
         }
 
-        TokenKind tk = tkind(&p);
-        if (tk == TOK_EOF) break;
-
-        if (tk != TOK_NEWLINE && tk != TOK_SEMICOLON)
+        if (!skip_until_expr(&p) && tkind(&p) != TOK_EOF)
         {
             e = expr_err(tspan(&p), "Trailing characters");
             da_append(m, e);
             ok = false;
             goto cleanup;
         }
-
-        for (; tk == TOK_NEWLINE || tk == TOK_SEMICOLON; tk = tkind(&p))
-            p.pos++;
     }
 
 cleanup:

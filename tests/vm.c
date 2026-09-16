@@ -236,11 +236,11 @@ TEST(lambda_rejects_undefined_symbol)
 TEST(conditional_eval)
 {
     START();
-        EVAL("'true ? 1 | 2");
+        EVAL("'true ? 1 : 2");
         NUM_EQ(val, 1, 1);
 
         EVAL("'x = 1");
-        EVAL("(2 > 1) ? 1 | ('x = 2)");
+        EVAL("(2 > 1) ? 1 : ('x = 2)");
         NUM_EQ(val, 1, 1);
         EVAL("'x");
         NUM_EQ(val, 1, 1);
@@ -250,7 +250,7 @@ TEST(conditional_eval)
 TEST(recursion_eval)
 {
     START();
-        EVAL("'f = 'n: 'n == 0 ? 1 | 'n * 'f ('n - 1)");
+        EVAL("'f = 'n: 'n == 0 ? 1 : 'n * 'f ('n - 1)");
         EVAL("'f 0");
         NUM_EQ(val, 1, 1);
         EVAL("'f 2");
@@ -263,7 +263,7 @@ TEST(recursion_eval)
         NUM_EQ(val, 120, 1);
 
         // inner recursion
-        EVAL("'foo = 'x: ('g = 'n: 'n == 0 ? 1 | 'n * 'g ('n - 1)) 'x");
+        EVAL("'foo = 'x: ('g = 'n: 'n == 0 ? 1 : 'n * 'g ('n - 1)) 'x");
         EVAL("'foo 5");
         NUM_EQ(val, 120, 1);
     END();

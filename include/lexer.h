@@ -49,7 +49,6 @@
     X(TOK_COLON,     ":") \
     X(TOK_DOLLAR,    "$") \
     X(TOK_QUESTION,  "?") \
-    X(TOK_BAR,       "|") \
     X(TOK_BACKTICK,  "`")
 
 #define AS_ENUM(name, _) name,

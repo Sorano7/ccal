@@ -443,7 +443,7 @@ TEST(parse_conditional)
 {
     Expr *e = NULL;
 
-    PARSE(e, "'true ? 1 | 2", 10);
+    PARSE(e, "'true ? 1 : 2", 10);
     EXPR_CHECK(e,
             expr_cond(
                 expr_id((Span){0}, SV("true")),

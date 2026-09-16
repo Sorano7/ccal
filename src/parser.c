@@ -126,7 +126,6 @@ static inline bool is_nud(Parser *p)
         case TOK_ID:
         case TOK_LBRAC:
         case TOK_UNDER:
-        case TOK_COLON:
             return true;
 
         case TOK_MINUS:
@@ -422,7 +421,7 @@ static Expr *parse_cond(Parser *p, Expr *if_)
         return then;
     }
 
-    CONSUME_EXPECT(p, TOK_BAR);
+    CONSUME_EXPECT(p, TOK_COLON);
 
     Expr *else_ = parse_expr(p, PREC_PRIMARY);
     if (is_error(else_)) 

@@ -67,7 +67,6 @@ static TokenKind token_kind_get(StringView src)
         case ':':  return TOK_COLON;
         case '$':  return TOK_DOLLAR;
         case '?':  return TOK_QUESTION;
-        case '|':  return TOK_BAR;
         case '\'': return TOK_SQUOTE;
         case '`':  return TOK_BACKTICK;
 

@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Added
 - Comments with `--`. Subtraction operator now must be space-separated from negation.
+- Multi-line support for REPL when the input ends with `;`.
 
 ### Changed
 - Lambda literal now must be inside parenthesis unless on the right of assignment or is lambda body.

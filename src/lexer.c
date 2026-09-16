@@ -250,7 +250,8 @@ static void consume_comment(StringView src, size_t *pos)
     size_t i = 0;
     for (; i < src.len; i++)
     {
-        if (token_kind_get(SRC) == TOK_NEWLINE)
+        TokenKind tk = token_kind_get(SRC);
+        if (tk == TOK_NEWLINE || tk == TOK_SEMICOLON)
             break;
     }
     *pos += i;

@@ -192,7 +192,6 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
 
     if (sv_equal(cmd, "q") || sv_equal(cmd, "quit"))
     {
-        printf("Exit.\n");
         should_continue = false;
     }
     else if (sv_equal(cmd, "h") || sv_equal(cmd, "help"))
@@ -226,24 +225,44 @@ void repl_start(VM *vm, RenderCtx *ctx)
 {
     rl_bind_key('\014', clear_screen);
 
-    String out;
-    str_reserve(&out, 1024);
+    String in, out;
+    str_reserve(&in, 256);
+    str_reserve(&out, 256);
     char *line;
 
     for (;;)
     {
-        line = readline("ccal> ");
-        if (!line) break;
+        const char *prompt = "ccal> ";
 
-        StringView src = sv_trim(SV(line));
-        if (src.len == 0) continue;
-        add_history(line);
+        for (;;)
+        {
+            line = readline(prompt);
+            if (!line) goto exit;
 
+            StringView part = sv_trim(SV(line));
+            if (part.len == 0) break;
+
+            str_append(&in, part);
+            free(line);
+
+            if (!sv_endswith(SV(in), SV(";")))
+                break;
+
+            prompt = "..... ";
+        }
+
+        if (in.len == 0) continue;
+
+        add_history(in.data);
+
+        StringView src = SV(in);
         if (sv_startswith(src, SV(":")))
         {
             sv_shift(&src, 1);
             if (!repl_handle_command(vm, ctx, src))
                 break;
+
+            str_reset(&in);
             continue;
         }
 
@@ -254,10 +273,13 @@ void repl_start(VM *vm, RenderCtx *ctx)
         printf(SV_FMT"\n", SV_ARG(SV(out)));
 
         str_reset(&out);
-        free(line);
+        str_reset(&in);
     }
 
+exit:
     str_free(&out);
+    str_free(&in);
+    printc(ACOLOR_CYAN, "Exit.\n");
 }
 
 // Run/evaluate a single expression.

@@ -404,7 +404,7 @@ static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
     if (as_lambda)
     {
         for (int i = 0; i < needs; i++)
-            str_appendf(sb, "('a%d : ", i+1);
+            str_appendf(sb, "('a%d: ", i+1);
     }
 
     str_appendf(sb, "'%s", builtin_to_str[v->as.builtin.kind]);
@@ -428,6 +428,8 @@ static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
     appendc(AFMT_RESET);
 }
 
+#define RENDER_SUBST(e) render_with_subst(s, (e), params, sb, ctx)
+
 // Render an expression with identifiers substituted.
 static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, RenderCtx *ctx)
 {
@@ -438,8 +440,8 @@ static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, Ren
             expr_render(e->as.lambda.param, sb);
             if (e->as.lambda.param->kind == EXPR_IDENT)
                 da_append(params, SV(e->as.lambda.param->as.id));
-            str_appendf(sb, " : ");
-            render_with_subst(s, e->as.lambda.body, params, sb, ctx);
+            str_appendf(sb, ": ");
+            RENDER_SUBST(e->as.lambda.body);
             str_appendf(sb, ")");
             break;
 
@@ -468,16 +470,24 @@ static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, Ren
 
         case EXPR_PREFIX:
             str_appendf(sb, " %s", op_to_str[e->as.prefix.op]);
-            render_with_subst(s, e->as.prefix.expr, params, sb, ctx);
+            RENDER_SUBST(e->as.prefix.expr);
             break;
 
         case EXPR_INFIX:
-            render_with_subst(s, e->as.infix.left, params, sb, ctx);
+            RENDER_SUBST(e->as.infix.left);
             if (e->as.infix.op == OP_APPLY)
                 str_appendf(sb, " ");
             else
                 str_appendf(sb, " %s ", op_to_str[e->as.infix.op]);
-            render_with_subst(s, e->as.infix.right, params, sb, ctx);
+            RENDER_SUBST(e->as.infix.right);
+            break;
+
+        case EXPR_COND:
+            RENDER_SUBST(e->as.cond.if_);
+            str_appendf(sb, " ? ");
+            RENDER_SUBST(e->as.cond.then);
+            str_appendf(sb, " : ");
+            RENDER_SUBST(e->as.cond.else_);
             break;
 
         default:

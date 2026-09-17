@@ -300,7 +300,7 @@ void expr_render(const Expr *e, String *sb)
         case EXPR_LAMBDA:
             str_appendf(sb, "(");
             expr_render(e->as.lambda.param, sb);
-            str_appendf(sb, " : ");
+            str_appendf(sb, ": ");
             expr_render(e->as.lambda.body, sb);
             str_appendf(sb, ")");
             break;
@@ -310,7 +310,7 @@ void expr_render(const Expr *e, String *sb)
             expr_render(e->as.cond.if_, sb);
             str_appendf(sb, " ? ");
             expr_render(e->as.cond.then, sb);
-            str_appendf(sb, " | ");
+            str_appendf(sb, " : ");
             expr_render(e->as.cond.else_, sb);
             str_appendf(sb, ")");
             break;

@@ -3,17 +3,10 @@ An arbitrary-precision calculator written in C.
 
 ## Quick Start
 
-Building from source:
-
-```sh
-cc cut.c -o cut && ./cut build ccal
-```
-
-## Usage
-
 ```
 ccal help                 --  show help
 ccal <opts>               --  start interactive REPL
+ccal run  <opts> <path>   --  run a script
 ccal eval <opts> <expr>   --  evaluate an expression
 ```
 
@@ -30,57 +23,97 @@ Options include:
 
 Similar commands are available in REPL, prefixed with `:`.
 
+
 ## Syntax
 
-### Numbers
+Each line is one or more expressions separated with `;`. Use `--` for comments, which ignores until a newline or another `--`.
+
+There are three types: `exact`, `real`, and `lambda`.
+
+## Exact Numbers
+
+A number literal is written as `I.N(R)`. Omitting the leading zero when `I` is zero is not supported.
+
+There are two ways to spell a sequence of digits, and a literal must use one or the other throughout.
+
+**Alphanumerics**
+
+- Digits: `[0-9][A-Z][a-z]`.
+- `_` can be used as separator and is ignored.
+- Supports up to base 62, case-insensitive until base 36.
+- Examples: `1_000_000`, `ff`, `0.hello(world)`.
+
+**Digit List**
+
+- A list of numeric digits surrounded by `[]` and separated by `,`.
+- Supports base up to `2^32-1` or `2^64-1`.
+- Examples: `[1, 0, 2, 4]`, `[15, 15]`, `[0].[1, 2]([3, 4])`.
+
+
+### Base
+
+Use the base tag `<base>#` in front of a number or a grouped expression to denote the base. The global `ibase` will be used for untagged literals.
+
+Alternatively, prefixes such as `0x` and `0b` can be used for a single number literal.
 
 ```
-base#I.N(R)
-```
-
-There are two ways to spell a sequence of digits, and a number must only contain one spelling.
-
-1. Alphanumerics: `[0-9][A-Z][a-z]_`. 
-    - Up to base 62, and case-insensitive until base 36.
-2. Digit list: `[..., ..., ...]`. 
-    - Up to base-`2^32 - 1` or `2^64 - 1` depending on the platform.
-
-Examples:
-
-```
-12#1A3    -- 12#[1, 10, 3]   -- 267
-16#a.a    -- 16#[10].[10]    -- 10.625
-1_000.(3) -- [1,0,0,0].([3]) -- 3001/3
-```
-
-The base annotation scopes to a single expression.
-
-```
-16#FF         -- 255
-16#FF + 100   -- 355
-16#(FF + 100) -- 511
+16#ff           -- 255
+16#(ff + 10)    -- 255 + 16
+16#(ff + 0o10)  -- 255 + 8
 ```
 
 ## Variables
 
-Variables are prefixed with `'` to distinguish from digits.
+Variables are dynamically typed and prefixed with `'` to distinguish from digits, with the exception of when it is used as an infix lambda.
+
+Assign to a variable with `=`. Assignment is an expression and right-associative.
 
 ```
-'foo = 42
-'x = 'y = 'foo * 2
-'true, 'false, 'ans, ...
+'x = 100
+'y = 'z = 'x
+```
+
+Use `'ans` to refer to the last value produced.
+
+```
+1 + 2; 'ans * 3    -- 9
 ```
 
 ## Lambdas
 
-Defined as `<param> : <body>`.
+A lambda literal is `<param>: <body>`, with a single parameter and a single expression as body. Must be wrapped in brackets unless on the right of an assignment or as the body of another lambda.
+
+Lambdas are pure and cannot mutate outer variables.
 
 ```
-'x: 'x + 1       -- fn (x) x + 1
-'x: 'y: 'x + 'y  -- fn (x) (fn (y) x + y)
+('x: 'x + 1)             -- (x) => x + 1
+'add = 'x: 'y: 'x + 'y   -- (x) => (y) => x + y 
 ```
 
-Three ways of application:
-1. White space (left-associative): `'f 'x`.
-2. Dollar sign (right-associative): `'f $ 'g 'x`.
-3. As infix: ``'x `f` 'y``
+Application can be white-space (left-associative), `$` (right-associative), or ``<a> `<f>` <b>`` (infix).
+
+```
+'add 1 2
+'map ('x: 'x ^ 'x) $ 1 `cons` 2 `cons` 'nil
+```
+
+Builtin lambdas include `'true`, `'false`, and math operations such as `'ln` and `'sqrt`.
+
+Boolean builtins can be produced by comparison and equality operations such as `'a == 'b`. Note that these are evaluated eagerly.
+
+
+### Conditionals and Recursion
+
+Conditional has the shape `<if> ? <then> : <else>`, which is evaluated lazily. Named recursion works by referencing the lambda's binding name.
+
+```
+'fac = 'n: ('n == 0) ? 1 : 'n * 'fac ('n - 1)
+
+'foldr = 'f: 'z: 'l: 'l 'z ('x: 'xs: 'f 'x $ 'foldr 'f 'z 'xs)
+```
+
+## Real Numbers
+
+Real values are produced by operations that largely produce irrational values, such as `'sqrt`, `^` with non-integer exponent, etc. Exact values are lifted to real when real values are involved.
+
+Real values are rendered with `~=` to distinguish from exact values, which is the same operator used for approximation.

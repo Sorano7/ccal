@@ -692,6 +692,7 @@ Value *vm_run_next(VM *v, StringView src, size_t offset)
     DA_FOR(&lines, i)
     {
         StringView line = da_at(&lines, i);
+        if (line.len == 0) continue;
 
         Expr *e = parse_line(sv_trim(line), v->base, offset);
         out = vm_run_expr(v, e);
@@ -719,6 +720,7 @@ Value *vm_run(VM *v, StringView input, Source *src)
     DA_FOR(&lines, i)
     {
         StringView line = da_at(&lines, i);
+        if (line.len == 0) continue;
 
         size_t offset = src ? source_get_offset(src) : 0;
         out = vm_run_next(v, line, offset);

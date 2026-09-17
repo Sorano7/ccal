@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Fixed 
 - Lambda no longer suppress undefined symbol error.
 - Self-referential lambdas no longer leaks memory.
+- Diagnostics now display against the correct source line.
 
 
 ## [1.1.0] - 2026-09-15

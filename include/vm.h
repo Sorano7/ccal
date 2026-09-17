@@ -10,14 +10,13 @@ typedef struct
     Scope *scope;
 } VM;
 
+void vm_env_render(VM *v, String *sb, RenderCtx *ctx);
+
 void vm_init(VM *v);
 void vm_reset(VM *v);
 void vm_free(VM *v);
 
-Value *vm_run_render(VM *v, StringView src, String *sb, RenderCtx *ctx);
-Value *vm_run(VM *v, StringView src);
-Value *vm_eval_expr(VM *v, const Expr *e);
-
-void vm_env_render(VM *v, String *sb, RenderCtx *ctx);
+Value *vm_run_next(VM *v, StringView line, size_t offset);
+Value *vm_run(VM *v, StringView input, Source *src);
 
 #endif

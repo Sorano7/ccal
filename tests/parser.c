@@ -4,7 +4,7 @@
 #define PARSE(e, src, b) do { \
     if (e) expr_destroy(&e); \
     (e) = parse(SV(src), (b)); \
-    if (is_error(e)) \
+    if (expr_is_err(e)) \
         CUT_FATAL("failed to parse "#src": ", \
                 SV_ARG((e)->as.err)); \
 } while (0)
@@ -22,7 +22,7 @@
 
 #define PARSE_FAIL(src, b) do { \
     Expr *e = parse(SV(src), (b)); \
-    if (!is_error(e)) \
+    if (!expr_is_err(e)) \
         CUT_FATAL("did not failed on parsing "#src); \
     expr_destroy(&e); \
 } while (0)

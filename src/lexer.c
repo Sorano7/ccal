@@ -276,8 +276,15 @@ static void consume_comment(StringView src, size_t *pos)
     *pos += i;
 }
 
+static void tokenlist_append(TokenList *tl, Token t, size_t offset)
+{
+    t.span.from += offset;
+    t.span.to += offset;
+    da_append(tl, t);
+}
+
 // Tokenize the source.
-bool tokenize(TokenList *tl, StringView src)
+bool tokenize(TokenList *tl, StringView src, size_t offset)
 {
     bool pending_space = false;
 
@@ -289,7 +296,9 @@ bool tokenize(TokenList *tl, StringView src)
         TokenKind kind = token_kind_get(SRC);
         size_t len = token_len(kind);
         Span span = {i, i+len};
+
         bool ok = true;
+        bool append = true;
 
         if (kind == TOK_SPACE)
         {
@@ -306,44 +315,40 @@ bool tokenize(TokenList *tl, StringView src)
 
             continue;
         }
+
         switch (kind)
         {
             case TOK_INVALID:
                 token_errorf(&t, span, "Invalid token");
-                da_append(tl, t);
-                return false;
-
-            case TOK_SPACE:
+                ok = false;
                 break;
 
             case TOK_DDASH:
                 consume_comment(SRC, &i);
+                append = false;
                 break;
 
             case TOK_DIGIT:
             case TOK_ALPHA:
                 build_number_token(&t, SRC, &i);
-                da_append(tl, t);
                 break;
 
             case TOK_SQUOTE:
                 ok = build_id_token(&t, SRC, &i);
-                da_append(tl, t);
-                if (!ok) return false;
                 break;
 
             case TOK_BACKTICK:
                 ok = build_infix_id_token(&t, SRC, &i);
-                da_append(tl, t);
-                if (!ok) return false;
                 break;
 
             default:
                 token_init(&t, kind, sv_slice(src, .from=i, .to=i+len), span);
-                da_append(tl, t);
                 i += len;
                 break;
         }
+
+        if (append) tokenlist_append(tl, t, offset);
+        if (!ok) return false;
 
         if (pending_space) {
             if (tl->len > 0)
@@ -353,7 +358,7 @@ bool tokenize(TokenList *tl, StringView src)
     }
 
     token_init(&t, TOK_EOF, SV(" "), (Span){i, i+1});
-    da_append(tl, t);
+    tokenlist_append(tl, t, offset);
     return true;
 }
 

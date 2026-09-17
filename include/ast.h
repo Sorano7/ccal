@@ -103,7 +103,7 @@ typedef struct Expr
 
 void expr_destroy(Expr **ep);
 
-#define is_error(e) (e->kind == EXPR_ERROR)
+#define expr_is_err(e) (e->kind == EXPR_ERROR)
 
 Expr *expr_err(Span span, const char *fmt, ...);
 Expr *expr_number(Span span);
@@ -121,17 +121,17 @@ void expr_render(const Expr *e, String *sb);
 
 typedef struct
 {
-    String src;
-    Expr *expr;
-} ModuleEntry;
-
-typedef struct
-{
-    ModuleEntry *data;
+    String buf;
+    Span *data;
     size_t len, cap;
-} Module;
+} Source;
 
-void module_append(Module *m, Expr *e, StringView s);
-void module_free(Module *m);
+void source_init(Source *s);
+void source_free(Source *s);
+
+void source_append_line(Source *s, StringView line);
+bool source_get_line(Source *s, Span target, Span *out_span, String *sb);
+
+size_t source_get_offset(Source *s);
 
 #endif

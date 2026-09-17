@@ -134,7 +134,7 @@ Value *scope_get_symbol(Scope *scope, StringView id);
 
 typedef struct
 {
-    StringView src;
+    Source *src;
     OutputFormat fmt;
     bool show_rational;
 

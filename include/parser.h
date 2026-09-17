@@ -3,10 +3,7 @@
 
 #include "ast.h"
 
-// Parse an expression.
+Expr *parse_line(StringView line, unsigned long base, size_t offset);
 Expr *parse(StringView src, unsigned long base);
-
-// Parse a module.
-bool parse_module(StringView src, unsigned long base, Module *m);
 
 #endif

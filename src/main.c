@@ -225,9 +225,14 @@ void repl_start(VM *vm, RenderCtx *ctx)
 {
     rl_bind_key('\014', clear_screen);
 
+    Source src;
+    source_init(&src);
+    ctx->src = &src;
+
     String in, out;
     str_reserve(&in, 256);
     str_reserve(&out, 256);
+
     char *line;
 
     for (;;)
@@ -250,52 +255,71 @@ void repl_start(VM *vm, RenderCtx *ctx)
             if (sv_endswith(SV(in), SV(";")))
                 continue;
 
+            if (sv_endswith(SV(in), SV("\\")))
+            {
+                in.len--;
+                continue;
+            }
+
             break;
         }
 
         if (in.len == 0) continue;
 
         add_history(in.data);
+        str_append(&in, "\n");
 
-        StringView src = SV(in);
-        if (sv_startswith(src, SV(":")))
+        StringView input = SV(in);
+        if (sv_startswith(input, SV(":")))
         {
-            sv_shift(&src, 1);
-            if (!repl_handle_command(vm, ctx, src))
+            sv_shift(&input, 1);
+            if (!repl_handle_command(vm, ctx, input))
                 break;
 
             str_reset(&in);
             continue;
         }
 
-        Value *result = vm_run_render(vm, src, &out, ctx);
-        printf(SV_FMT"\n", SV_ARG(SV(out)));
+        size_t offset = source_get_offset(&src);
+        Value *result = vm_run_next(vm, input, offset);
+        source_append_line(&src, input);
+
+        value_render(result, &out, ctx);
         value_release(&result);
 
-        str_reset(&out);
+        printf(SV_FMT"\n", SV_ARG(SV(out)));
+
         str_reset(&in);
+        str_reset(&out);
     }
 
 exit:
-    str_free(&out);
     str_free(&in);
+    str_free(&out);
+    source_free(&src);
+
     printc(ACOLOR_CYAN, "Exit.\n");
 }
 
 // Run/evaluate a single expression.
-bool run_eval(VM *vm, FILE *fdout, StringView src, RenderCtx *ctx)
+bool run_eval(VM *vm, FILE *fdout, StringView input, RenderCtx *ctx)
 {
-    String s;
-    str_reserve(&s, 1024);
+    String out;
+    str_init(&out);
 
-    Value *result = vm_run(vm, src);
+    Source src;
+    source_init(&src);
+    ctx->src = &src;
+
+    Value *result = vm_run(vm, input, &src);
+    value_render(result, &out, ctx);
+    fprintf(fdout, SV_FMT"\n", SV_ARG(SV(out)));
+
     bool ok = !value_is_err(result);
-    ctx->src =src;
-    value_render(result, &s, ctx);
-    fprintf(fdout, SV_FMT"\n", SV_ARG(SV(s)));
-
     value_release(&result);
-    str_free(&s);
+
+    str_free(&out);
+    source_free(&src);
     return ok;
 }
 

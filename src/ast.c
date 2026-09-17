@@ -320,22 +320,73 @@ void expr_render(const Expr *e, String *sb)
     }
 }
 
-void module_append(Module *m, Expr *e, StringView s)
+void source_init(Source *s)
 {
-    ModuleEntry entry = {0};
-    entry.expr = e;
-    str_init_with(&entry.src, s);
-    da_append(m, entry);
+    str_reserve(&s->buf, 1024);
+    da_init(s);
 }
 
-void module_free(Module *m)
+void source_free(Source *s)
 {
-    DA_FOR(m, i)
+    str_free(&s->buf);
+    da_free(s);
+}
+
+void source_append_line(Source *s, StringView line)
+{
+    Span span = {s->buf.len, s->buf.len + line.len};
+    str_append(&s->buf, line);
+    da_append(s, span);
+}
+
+static bool find_span(Source *s, Span query, Span *out)
+{
+    size_t lo = 0;
+    size_t hi = s->len - 1;
+    size_t cand = SIZE_MAX;
+
+    while (lo <= hi)
     {
-        ModuleEntry entry = da_at(m, i);
-        if (entry.expr)
-            expr_destroy(&entry.expr);
-        str_free(&entry.src);
+        size_t mid = lo + (hi - lo) / 2;
+        if (da_at(s, mid).from <= query.from)
+        {
+            cand = mid;
+            lo = mid + 1;
+        }
+        else
+        {
+            hi = mid - 1;
+        }
     }
-    da_free(m);
+
+    if (cand == SIZE_MAX)
+        return false;
+
+    Span c = da_at(s, cand);
+    if (c.from <= query.from && query.to <= c.to)
+    {
+        *out = c;
+        return true;
+    }
+    return false;
+}
+
+bool source_get_line(Source *s, Span target, Span *out_span, String *sb)
+{
+    Span line_span = {0};
+    if (!find_span(s, target, &line_span))
+        return false;
+
+    StringView line = sv_slice(SV(s->buf), .from=line_span.from, .to=line_span.to);
+    str_append(sb, line);
+
+    out_span->from -= line_span.from;
+    out_span->to -= line_span.from;
+    return true;
+}
+
+size_t source_get_offset(Source *s)
+{
+    if (s->len == 0) return 0;
+    return da_last(s).to;
 }

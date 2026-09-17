@@ -13,7 +13,7 @@
         .fmt           = FMT_AUTO, \
         .show_rational = false, \
         .use_color     = false, \
-        .src           = SV(""), \
+        .src           = NULL, \
     }; \
     (void)ctx; \
     VM vm; vm_init(&vm); \
@@ -25,23 +25,22 @@
 
 #define EVAL(src) do { \
     if (val) value_release(&val); \
-    val = vm_run(&vm, SV(src)); \
+    val = vm_run(&vm, SV(src), NULL); \
     if (value_is_err(val)) \
-        CUT_FATAL("failed to parse "#src": "SV_FMT, \
+        CUT_FATAL("failed to run "#src": "SV_FMT, \
                 SV_ARG(SV(val->as.error))); \
 } while (0)
 
 #define EVAL_RENDER(s) do { \
     str_reset(&sb); \
     EVAL(s); \
-    ctx.src = SV(s); \
     value_render(val, &sb, &ctx); \
 } while (0)
 
 #define EVAL_FAIL(src) do { \
-    val = vm_run(&vm, SV(src)); \
+    val = vm_run(&vm, SV(src), NULL); \
     if (!value_is_err(val)) \
-        CUT_FATAL("did not failed on parsing "#src); \
+        CUT_FATAL("did not failed on running "#src); \
     value_release(&val); \
 } while (0)
 

@@ -330,7 +330,7 @@ static Expr *parse_neg(Parser *p)
         return expr_err(tspan(p), "Expected number or group");
 
     Expr *e = parse_expr(p, PREC_PREFIX);
-    if (is_error(e)) return e;
+    if (expr_is_err(e)) return e;
 
     return expr_prefix(s, OP_NEG, e);
 }
@@ -356,12 +356,12 @@ static Expr *parse_lambda_or_expr(Parser *p, int prec)
 static Expr *parse_lambda(Parser *p)
 {
     Expr *id = parse_ident(p);
-    if (is_error(id)) return id;
+    if (expr_is_err(id)) return id;
 
     CONSUME_EXPECT(p, TOK_COLON);
 
     Expr *body = parse_lambda_or_expr(p, PREC_PRIMARY);
-    if (is_error(body)) return body;
+    if (expr_is_err(body)) return body;
 
     return expr_lambda(id, body);
 }
@@ -371,7 +371,7 @@ static Expr *parse_group(Parser *p)
 {
     CONSUME_EXPECT(p, TOK_LPAREN);
     Expr *e = parse_lambda_or_expr(p, PREC_PRIMARY);
-    if (is_error(e)) return e;
+    if (expr_is_err(e)) return e;
     CONSUME_EXPECT(p, TOK_RPAREN);
     return e;
 }
@@ -401,7 +401,7 @@ static Expr *parse_nud(Parser *p)
 static Expr *parse_apply(Parser *p, Expr *func)
 {
     Expr *arg = parse_nud(p);
-    if (is_error(arg))
+    if (expr_is_err(arg))
     {
         expr_destroy(&func);
         return arg;
@@ -415,7 +415,7 @@ static Expr *parse_cond(Parser *p, Expr *if_)
     CONSUME_EXPECT(p, TOK_QUESTION);
 
     Expr *then = parse_expr(p, PREC_PRIMARY);
-    if (is_error(then)) 
+    if (expr_is_err(then)) 
     {
         expr_destroy(&if_);
         return then;
@@ -424,7 +424,7 @@ static Expr *parse_cond(Parser *p, Expr *if_)
     CONSUME_EXPECT(p, TOK_COLON);
 
     Expr *else_ = parse_expr(p, PREC_PRIMARY);
-    if (is_error(else_)) 
+    if (expr_is_err(else_)) 
     {
         expr_destroy(&if_);
         expr_destroy(&then);
@@ -440,7 +440,7 @@ static Expr *parse_infix_apply(Parser *p, Expr *left)
     p->pos++;
 
     Expr *right = parse_expr(p, PREC_PRIMARY);
-    if (is_error(right))
+    if (expr_is_err(right))
     {
         expr_destroy(&f);
         return right;
@@ -476,7 +476,7 @@ static Expr *parse_led(Parser *p, int prec, Expr *left)
         prec--;
 
     Expr *right = parse_lambda_or_expr(p, prec);
-    if (is_error(right))
+    if (expr_is_err(right))
     {
         expr_destroy(&left);
         return right;
@@ -489,7 +489,7 @@ static Expr *parse_led(Parser *p, int prec, Expr *left)
 static Expr *parse_expr(Parser *p, int prec)
 {
     Expr *e = parse_nud(p);
-    if (is_error(e)) return e;
+    if (expr_is_err(e)) return e;
 
     for (;;)
     {
@@ -504,107 +504,46 @@ static Expr *parse_expr(Parser *p, int prec)
             if ((int)tprec(p) <= prec) break;
             e = parse_led(p, tprec(p), e);
         }
-        if (is_error(e)) return e;
+        if (expr_is_err(e)) return e;
     }
     return e;
 }
 
-static void collect_lines(SVList *lines, StringView src)
+// Parse a single line of one expression with an offset into the source.
+Expr *parse_line(StringView line, unsigned long base, size_t offset)
 {
-    while (src.len > 0)
-    {
-        StringView line = sv_split(&src, '\n');
-        da_append(lines, sv_trim(line));
-    }
-}
-
-static bool parse_line(Parser *p, StringView line, Module *m)
-{
-    Expr *e = NULL;
-
-    if (!tokenize(p->tl, line))
-    {
-        Token err = da_last(p->tl);
-        DEV_MUST(err.kind == TOK_ERROR);
-        e = expr_err(err.span, SV_FMT, SV_ARG(SV(err.value)));
-        module_append(m, e, line);
-        return false;
-    }
-
-    while (tkind(p) == TOK_SEMICOLON) p->pos++;
-
-    while (tkind(p) != TOK_EOF)
-    {
-        e = parse_expr(p, PREC_PRIMARY);
-        module_append(m, e, line);
-        if (is_error(e)) return false;
-
-        if (tkind(p) == TOK_SEMICOLON)
-        {
-            while (tkind(p) == TOK_SEMICOLON) p->pos++;
-            continue;
-        }
-        else
-        {
-            if (tkind(p) != TOK_EOF)
-                break;
-        }
-    }
-
-    if (tkind(p) != TOK_EOF)
-    {
-        e = expr_err(tspan(p), "Trailing characters");
-        module_append(m, e, line);
-        return false;
-    }
-
-    token_list_reset(p->tl);
-    p->pos = 0;
-    return true;
-}
-
-// Parse a module.
-bool parse_module(StringView src, unsigned long base, Module *m)
-{
-    Span s = {0, 0};
-    if (base == 0) base = BASE_DEFAULT;
-    if (base == 1) return expr_err(s, "Base must be at least 2");
-
-    bool ok = true;
-
-    SVList lines;
-    da_init(&lines);
-    collect_lines(&lines, src);
-    if (lines.len == 0)
-        return expr_err(s, "Empty expression");
-
     TokenList tl = {0};
     da_init(&tl);
 
     Parser p = {&tl, 0, base};
 
-    for (size_t i = 0; i < lines.len; i++)
+    Expr *out = NULL;
+    if (!tokenize(p.tl, line, offset))
     {
-        if (!parse_line(&p, da_at(&lines, i), m))
-            break;
+        Token err = da_last(p.tl);
+        DEV_MUST(err.kind == TOK_ERROR);
+        out = expr_err(err.span, SV_FMT, SV_ARG(SV(err.value)));
+    }
+    else
+    {
+        out = parse_expr(&p, PREC_PRIMARY);
+
+        if (!expr_is_err(out))
+        {
+            while (tkind(&p) == TOK_SEMICOLON || tkind(&p) == TOK_NEWLINE)
+                p.pos++;
+
+            if (tkind(&p) != TOK_EOF)
+                out = expr_err(tspan(&p), "Trailing characters");
+        }
     }
 
-    da_free(&lines);
-    token_list_free(&tl);
-    return ok;
+    DEV_MUST(out);
+    token_list_free(p.tl);
+    return out;
 }
 
-// Parse an expression.
 Expr *parse(StringView src, unsigned long base)
 {
-    Module m;
-    da_init(&m);
-
-    parse_module(src, base, &m);
-
-    ModuleEntry last = da_last(&m);
-    Expr *e = expr_clone(last.expr);
-    module_free(&m);
-    return e;
+    return parse_line(src, base, 0);
 }
-

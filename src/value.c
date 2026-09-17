@@ -77,7 +77,7 @@ Value *value_errorf(Span span, const char *fmt, ...)
 
 Value *value_error_from_expr(const Expr *e)
 {
-    DEV_MUST(is_error(e));
+    DEV_MUST(expr_is_err(e));
     Value *v = value_new(VAL_ERROR, e->span);
     str_init_with(&v->as.error, &e->as.err);
     return v;
@@ -320,60 +320,79 @@ Value *scope_get_symbol(Scope *scope, StringView id)
     return NULL;
 }
 
+#define appendc(c) do { \
+    if (ctx->use_color) str_appendf(sb, (c)); \
+} while (0)
+
 // Render an exact value.
 static void value_render_exact(Value *v, String *sb, RenderCtx *ctx)
 {
     if (ctx->base >= 62)
     {
-        if (ctx->use_color) str_appendf(sb, ACOLOR_MAGENTA);
+        appendc(ACOLOR_MAGENTA);
         str_append(sb, "Output base too large");
-        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+        appendc(AFMT_RESET);
         return;
     }
 
     if (ctx->base != BASE_DEFAULT)
     {
-        if (ctx->use_color) str_appendf(sb, AFMT_DIM);
+        appendc(AFMT_DIM);
         str_appendf(sb, "%lu#", ctx->base);
-        if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+        appendc(AFMT_RESET);
     }
 
-    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+    appendc(ACOLOR_YELLOW);
 
     render_mpq_as_decimal(sb, v->as.exact, ctx->base, ctx->max_digits);
 
     bool den_is_one = mpz_cmp_ui(mpq_denref(v->as.exact), 1) == 0;
     if (ctx->show_rational && !den_is_one)
     {
-        if (ctx->use_color) str_appendf(sb, AFMT_RESET AFMT_DIM);
+        appendc(AFMT_RESET AFMT_DIM);
 
         char *s = mpq_get_str(NULL, ctx->base, v->as.exact);
         str_appendf(sb, " or %s", s);
         free(s);
     }
 
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+    appendc(AFMT_RESET);
 }
 
 // Render an error value.
 static void value_render_error(Value *v, String *sb, RenderCtx *ctx)
 {
-    str_appendf(sb, SV_FMT"\n", SV_ARG(ctx->src));
-    for (size_t i = 0; i < v->span.from; i++)
-        str_append(sb, " ");
+    Span err_span = v->span;
+    bool show_src = ctx->src 
+        && source_get_line(ctx->src, v->span, &err_span, sb)
+        && sb->len > 0;
 
-    if (ctx->use_color) str_appendf(sb, AFMT_BOLD ACOLOR_MAGENTA);
-    for (size_t i = 0; i < v->span.to - v->span.from; i++)
-        str_appendf(sb, "^");
+    if (show_src)
+    {
+        if (!sv_endswith(SV(sb), SV("\n")))
+            str_append(sb, "\n");
 
-    str_appendf(sb, " "SV_FMT, SV_ARG(SV(v->as.error)));
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+        for (size_t i = 0; i < err_span.from; i++)
+            str_append(sb, " ");
+    }
+
+    appendc(AFMT_BOLD ACOLOR_MAGENTA);
+    if (show_src)
+    {
+        size_t len = err_span.to - err_span.from;
+        for (size_t i = 0; i < len; i++)
+            str_appendf(sb, "^");
+        str_appendf(sb, " ");
+    }
+
+    str_append(sb, SV(v->as.error));
+    appendc(AFMT_RESET);
 }
 
 // Render a builtin value.
 static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
 {
-    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+    appendc(ACOLOR_YELLOW);
 
     int applied = v->as.builtin.args.len;
     int needs = v->as.builtin.arity - applied;
@@ -394,7 +413,7 @@ static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
         {
             str_append(sb, " ");
             value_render(da_at(&v->as.builtin.args, i), sb, ctx);
-            if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+            appendc(ACOLOR_YELLOW);
         }
 
         for (int i = 0; i < needs; i++)
@@ -404,7 +423,7 @@ static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
             str_append(sb, ")");
     }
 
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+    appendc(AFMT_RESET);
 }
 
 // Render an expression with identifiers substituted.
@@ -441,7 +460,7 @@ static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, Ren
             }
 
             value_render(existing, sb, ctx);
-            if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+            appendc(ACOLOR_YELLOW);
             value_release(&existing);
             break;
 
@@ -468,7 +487,7 @@ static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, Ren
 // Render a lambda value;
 static void value_render_lambda(Value *v, String *sb, RenderCtx *ctx)
 {
-    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+    appendc(ACOLOR_YELLOW);
 
     SVList sl;
     da_init(&sl);
@@ -479,24 +498,23 @@ static void value_render_lambda(Value *v, String *sb, RenderCtx *ctx)
     render_with_subst(v->as.lambda.env, e, &sl, sb, ctx);
 
     da_free(&sl);
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+    appendc(AFMT_RESET);
 }
 
 // Compute and render a real value.
 static void value_render_real(Value *v, String *sb, RenderCtx *ctx)
 {
-
     mpfi_t result;
     mpfi_init2(result, ctx->prec);
     cr_eval(v->as.real, ctx->prec, result);
 
-    if (ctx->use_color) str_appendf(sb, AFMT_DIM);
+    appendc(AFMT_DIM);
     str_append(sb, "~= ");
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+    appendc(AFMT_RESET);
 
-    if (ctx->use_color) str_appendf(sb, ACOLOR_YELLOW);
+    appendc(ACOLOR_YELLOW);
     render_mpfi(sb, result, ctx->base, ctx->max_digits, ctx->fmt);
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+    appendc(AFMT_RESET);
 
     mpfi_clear(result);
 }

@@ -86,6 +86,6 @@ Operator token_to_op(Token t);
 void token_list_reset(TokenList *tl);
 void token_list_free(TokenList *tl);
 
-bool tokenize(TokenList *ta, StringView src);
+bool tokenize(TokenList *ta, StringView src, size_t offset);
 
 #endif

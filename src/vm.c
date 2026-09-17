@@ -28,6 +28,35 @@ void vm_free(VM *v)
     if (v->last) value_release(&v->last);
 }
 
+// Render the current environment of the VM.
+void vm_env_render(VM *v, String *sb, RenderCtx *ctx)
+{
+    Scope *scope = v->scope;
+
+    if (ctx->use_color) str_appendf(sb, ACOLOR_CYAN);
+    str_appendf(sb, "Env (%zu)\n", scope->len);
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+
+    if (v->last)
+    {
+        str_append(sb, "    ans = ");
+        value_render(v->last, sb, ctx);
+        str_append(sb, "\n");
+    }
+
+    DA_FOR(v->scope, i)
+    {
+        Symbol sym = da_at(v->scope, i);
+        str_appendf(sb, "    "SV_FMT" = ", SV_ARG(SV(sym.id)));
+        value_render(sym.value, sb, ctx);
+        str_append(sb, "\n");
+    }
+
+    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+}
+
+static Value *eval_expr(VM *v, const Expr *e);
+
 // Evaluate a number expression.
 static Value *eval_number(const Expr *e)
 {
@@ -170,8 +199,7 @@ static Value *eval_lambda_apply(VM *v, const Value *f, Value *arg)
     const Expr *func = f->as.lambda.expr;
     if (func->as.lambda.param->kind == EXPR_IDENT)
         scope_set_symbol(v->scope, SV(func->as.lambda.param->as.id), arg);
-    Value *out = vm_eval_expr(v, func->as.lambda.body);
-    out->span = f->span;
+    Value *out = eval_expr(v, func->as.lambda.body);
 
     v->scope = prev;
     scope_release(&s);
@@ -279,10 +307,10 @@ static Value *eval_builtin_apply(Value *f, Value *arg)
 // Evaluate an application expression.
 static Value *eval_apply(VM *v, const Expr *f, const Expr *a)
 {
-    Value *func = vm_eval_expr(v, f);
+    Value *func = eval_expr(v, f);
     if (value_is_err(func)) return func;
 
-    Value *arg = vm_eval_expr(v, a);
+    Value *arg = eval_expr(v, a);
     if (value_is_err(arg))
     {
         value_release(&func);
@@ -490,7 +518,7 @@ static Value *eval_assign_infix(VM *v, const Expr *e)
     if (e->as.infix.right->kind == EXPR_LAMBDA)
         out = eval_lambda(v, e->as.infix.right, SV(l->as.id));
     else
-        out = vm_eval_expr(v, e->as.infix.right);
+        out = eval_expr(v, e->as.infix.right);
 
     if (value_is_err(out)) return out;
 
@@ -509,10 +537,10 @@ static Value *eval_infix(VM *v, const Expr *e)
     if (e->as.infix.op == OP_APPLY || e->as.infix.op == OP_PIPE)
         return eval_apply(v, e->as.infix.left, e->as.infix.right);
 
-    Value *l = vm_eval_expr(v, e->as.infix.left);
+    Value *l = eval_expr(v, e->as.infix.left);
     if (value_is_err(l)) return l;
 
-    Value *r = vm_eval_expr(v, e->as.infix.right);
+    Value *r = eval_expr(v, e->as.infix.right);
     if (value_is_err(r))
     {
         value_release(&l);
@@ -565,7 +593,7 @@ static Value *eval_infix(VM *v, const Expr *e)
 // Evaluate a prefix expression.
 static Value *eval_prefix(VM *v, const Expr *e)
 {
-    Value *out = vm_eval_expr(v, e->as.prefix.expr);
+    Value *out = eval_expr(v, e->as.prefix.expr);
     if (value_is_err(out)) return out;
 
     switch (out->kind)
@@ -606,7 +634,7 @@ static Value *eval_prefix(VM *v, const Expr *e)
 // Evaluate a conditional expression.
 static Value *eval_cond(VM *v, const Expr *e)
 {
-    Value *cond = vm_eval_expr(v, e->as.cond.if_);
+    Value *cond = eval_expr(v, e->as.cond.if_);
     if (value_is_err(cond)) return cond;
 
     if (!value_is_bool(cond))
@@ -617,21 +645,19 @@ static Value *eval_cond(VM *v, const Expr *e)
     }
 
     Value *out = value_to_bool(cond)
-        ? vm_eval_expr(v, e->as.cond.then)
-        : vm_eval_expr(v, e->as.cond.else_);
+        ? eval_expr(v, e->as.cond.then)
+        : eval_expr(v, e->as.cond.else_);
 
     value_release(&cond);
     return out;
 }
 
 // Evaluate an expression.
-Value *vm_eval_expr(VM *v, const Expr *e)
+Value *eval_expr(VM *v, const Expr *e)
 {
-    if (is_error(e))
-        return value_error_from_expr(e);
+    DEV_MUST(!expr_is_err(e));
 
     Value *out = NULL;
-
     switch (e->kind)
     {
         case EXPR_NUMBER: out = eval_number(e);            break;
@@ -646,84 +672,85 @@ Value *vm_eval_expr(VM *v, const Expr *e)
     return out;
 }
 
-static Value *vm_run_module(VM *v, StringView src, Module *m)
+// Collect lines separated by newline or semicolon. Does not trim.
+static void collect_lines(SVList *lines, StringView src)
 {
+    while (src.len > 0)
+    {
+        size_t newline = sv_find(src, '\n');
+        size_t scolon = sv_find(src, ';');
+        char delim = newline < scolon ? '\n' : ';';
+
+        StringView line = sv_split(&src, delim);
+        da_append(lines, line);
+    }
+}
+
+static Value *vm_run_expr(VM *v, Expr *e)
+{
+    if (expr_is_err(e))
+        return value_error_from_expr(e);
+
+    Value *out = eval_expr(v, e);
+    DEV_MUST(out);
+
+    if (value_is_err(out)) return out;
+
+    if (v->last) value_release(&v->last);
+    v->last = value_retain(out);
+
+    return out;
+}
+
+Value *vm_run_next(VM *v, StringView src, size_t offset)
+{
+    SVList lines;
+    da_init(&lines);
+    collect_lines(&lines, src);
+
     Value *out = NULL;
 
-    if (!parse_module(src, v->base, m))
+    DA_FOR(&lines, i)
     {
-        ModuleEntry err = da_last(m);
-        return value_error_from_expr(err.expr);
-    }
+        StringView line = da_at(&lines, i);
 
-    DA_FOR(m, i)
-    {
-        ModuleEntry entry = da_at(m, i);
-        const Expr *e = entry.expr;
+        Expr *e = parse_line(sv_trim(line), v->base, offset);
+        out = vm_run_expr(v, e);
+        expr_destroy(&e);
 
-        out = vm_eval_expr(v, e);
-        if (value_is_err(out))
-            return out;
+        if (value_is_err(out)) break;
 
-        if (v->last) value_release(&v->last);
-        v->last = value_retain(out);
+        offset += line.len;
 
-        if (i < m->len-1)
+        if (i < lines.len-1)
             value_release(&out);
     }
+
+    da_free(&lines);
     return out;
 }
 
-Value *vm_run_render(VM *v, StringView src, String *sb, RenderCtx *ctx)
+Value *vm_run(VM *v, StringView input, Source *src)
 {
-    Module m;
-    da_init(&m);
+    SVList lines;
+    da_init(&lines);
+    collect_lines(&lines, input);
 
-    Value *out = vm_run_module(v, src, &m);
-    ModuleEntry last = da_last(&m);
-
-    ctx->src = SV(last.src);
-    value_render(out, sb, ctx);
-
-    module_free(&m);
-    return out;
-}
-
-// Run and evaluate a source.
-Value *vm_run(VM *v, StringView src)
-{
-    Module m;
-    da_init(&m);
-
-    Value *out = vm_run_module(v, src, &m);
-
-    module_free(&m);
-    return out;
-}
-
-// Render the current environment of the VM.
-void vm_env_render(VM *v, String *sb, RenderCtx *ctx)
-{
-    Scope *scope = v->scope;
-
-    if (ctx->use_color) str_appendf(sb, ACOLOR_CYAN);
-    str_appendf(sb, "Env (%zu)\n", scope->len);
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
-
-    if (v->last)
+    Value *out = NULL;
+    DA_FOR(&lines, i)
     {
-        str_append(sb, "    ans = ");
-        value_render(v->last, sb, ctx);
-        str_append(sb, "\n");
+        StringView line = da_at(&lines, i);
+
+        size_t offset = src ? source_get_offset(src) : 0;
+        out = vm_run_next(v, line, offset);
+        if (src) source_append_line(src, line);
+
+        if (value_is_err(out)) break;
+
+        if (i < lines.len-1)
+            value_release(&out);
     }
 
-    DA_FOR(v->scope, i)
-    {
-        Symbol sym = da_at(v->scope, i);
-        str_appendf(sb, "    "SV_FMT" = ", SV_ARG(SV(sym.id)));
-        value_render(sym.value, sb, ctx);
-        str_append(sb, "\n");
-    }
-
-    if (ctx->use_color) str_appendf(sb, AFMT_RESET);
+    da_free(&lines);
+    return out;
 }

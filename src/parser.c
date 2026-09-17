@@ -163,7 +163,7 @@ static Expr *parse_number_part_alnum(Parser *p, DigitArray *ds, bool has_base, S
     if (has_base) sv_shift(&src, 2);
 
     DigitResult res = digits_from_alnum(ds, src, p->base);
-    s.from += res.pos;
+    s.from += res.pos + (has_base ? 2 : 0);
     s.to = s.from+1;
 
     switch (res.kind)
@@ -196,11 +196,11 @@ static Expr *parse_number_part_dlist(Parser *p, DigitArray *ds, Span *out)
         {
             t = token(p);
             if (tkind(p) != TOK_DIGIT)
-                return expr_err(t.span, "Expected numeric value as digit");
+                return expr_err(t.span, "Not a digit");
 
             unsigned long val;
             if (!token_to_ul(t, &val) || val >= p->base)
-                return expr_err(t.span, "Digit out of bounds");
+                return expr_err(t.span, "Digit out of bounds for base %lu", p->base);
 
             da_append(ds, val);
             p->pos++;
@@ -252,7 +252,7 @@ static bool try_parse_base_prefix(Token *t, unsigned long *base)
 static Expr *parse_number(Parser *p, DigitFormat fmt)
 {
     Expr *e = NULL;
-    Span s = {0};
+    Span s = tspan(p);
 
     Literal lit;
     literal_init(&lit);
@@ -372,6 +372,9 @@ static Expr *parse_group(Parser *p)
     CONSUME_EXPECT(p, TOK_LPAREN);
     Expr *e = parse_lambda_or_expr(p, PREC_PRIMARY);
     if (expr_is_err(e)) return e;
+
+    e->span.from--;
+    e->span.to++;
     CONSUME_EXPECT(p, TOK_RPAREN);
     return e;
 }
@@ -393,7 +396,8 @@ static Expr *parse_nud(Parser *p)
         case TOK_ID:     return parse_ident(p);
         case TOK_LPAREN: return parse_group(p);
         case TOK_MINUS:  return parse_neg(p);
-        default:         return expr_err(tspan(p), "Invalid expression");
+        default:         return expr_err(tspan(p),
+                                 "Expected expression, got '%s'", tk_to_str[tkind(p)]);
     }
 }
 

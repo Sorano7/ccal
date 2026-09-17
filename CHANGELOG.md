@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Added
 - Comments with `--`. Subtraction operator now must be space-separated from negation.
-- Multi-line support for REPL when the input ends with `;`.
+- Multi-line support for REPL.
 - REPL command to clear the session.
 - CLI subcommand to run a script.
 

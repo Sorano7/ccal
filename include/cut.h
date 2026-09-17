@@ -66,6 +66,14 @@
     } \
 } while (0)
 
+#define da_resize(da, c) do { \
+    if ((da)->cap < (c)) { \
+        (da)->cap = (c); \
+        (da)->data = realloc((da)->data, (da)->cap * sizeof(*(da)->data)); \
+        if (!(da)->data) abort(); \
+    } \
+} while (0)
+
 // Append an item to the dynamic array.
 #define da_append(da, item) do { \
     da_grow(da); \
@@ -221,6 +229,9 @@ StringView sv_slice_opt(StringView s, SVSLiceOpt opt);
 
 // Read a full line from the file stream.
 void str_readline(String *s, FILE *stream);
+
+// Read the content of a file.
+bool str_readfile(String *s, FILE *file);
 
 // Check if the string view starts with a prefix.
 bool sv_startswith(StringView s, StringView prefix);
@@ -834,6 +845,43 @@ void str_readline(String *s, FILE *stream)
         StringView sv = {chunk, strlen(chunk)};
         if (sv_find(sv, '\n') != SIZE_MAX) break;
         if (sv.len < sizeof(chunk)-1) break;
+    }
+}
+
+bool str_readfile(String *s, FILE *file)
+{
+    struct stat st;
+    long file_size = -1;
+
+    if (fstat(fileno(file), &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0)
+        file_size = (long)st.st_size;
+
+    if (file_size > 0)
+    {
+        da_resize(s, s->len + (size_t)file_size + 1);
+        size_t total = 0;
+        while (total < (size_t)file_size)
+        {
+            size_t n = fread(s->data + s->len + total, 1,
+                    (size_t)file_size-total, file);
+            if (n == 0) break;
+            total += n;
+        }
+        s->len += total;
+        s->data[s->len] = '\0';
+        return !ferror(file);
+    }
+
+    for (;;)
+    {
+        da_resize(s, s->len+1024+1);
+        size_t n = fread(s->data + s->len, 1, 1024, file);
+        s->len += n;
+        if (n < 1024)
+        {
+            s->data[s->len] = '\0';
+            return !ferror(file);
+        }
     }
 }
 

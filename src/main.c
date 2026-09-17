@@ -38,6 +38,7 @@
 const char cli_help[] =  "Commands:\n"
                          "     ccal help                  show this help\n"
                          "     ccal <opts>                start interactive REPL\n"
+                         "     ccal run  <opts> <path>    run a script and output the result\n"
                          "     ccal eval <opts> <expr>    evaluate and output the result\n"
                          "\n"
                          "Options:\n"
@@ -330,6 +331,32 @@ bool run_eval(VM *vm, FILE *fdout, StringView input, RenderCtx *ctx)
     return ok;
 }
 
+bool run_script(VM *vm, StringView path, RenderCtx *ctx)
+{
+    String buf;
+    str_init(&buf);
+
+    SV_TO_CSTR(path, path_buf);
+
+    FILE *f = fopen(path_buf, "r");
+    if (!f)
+    {
+        fprintf(stderr, "Error opening "SV_FMT, SV_ARG(path));
+        return false;
+    }
+
+    if (!str_readfile(&buf, f))
+    {
+        fprintf(stderr, "Error reading "SV_FMT, SV_ARG(path));
+        return false;
+    }
+    fclose(f);
+
+    bool ok = run_eval(vm, stdout, SV(buf), ctx);
+    str_free(&buf);
+    return ok;
+}
+
 int main(int argc, char **argv)
 {
     VM vm;
@@ -351,6 +378,7 @@ int main(int argc, char **argv)
     SVList args;
     da_init(&args);
 
+    cut_fp_add_command(&fp, SV("run"));
     cut_fp_add_command(&fp, SV("eval"));
     cut_fp_add_command(&fp, SV("help"));
 
@@ -372,12 +400,27 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    StringView cmd = cut_fp_get_command(&fp, argc, argv);
-
     bool ok = true;
+
+    StringView cmd = cut_fp_get_command(&fp, argc, argv);
     if (sv_equal(cmd, "help"))
     {
         printf(cli_help);
+    }
+    else if (sv_equal(cmd, "run"))
+    {
+        if (args.len == 0)
+        {
+            fprintf(stderr, "No input file.\n");
+            return 1;
+        }
+        if (args.len > 1)
+        {
+            fprintf(stderr, "Too many arguments.\n");
+            return 1;
+        }
+
+        ok = run_script(&vm, args.data[0], &ctx);
     }
     else if (sv_equal(cmd, "eval"))
     {
@@ -386,14 +429,12 @@ int main(int argc, char **argv)
 
         if (args.len == 0)
         {
-            fprintf(stderr, "Empty expression\n");
+            fprintf(stderr, "Empty expression.\n");
             return 1;
         }
 
         svlist_join(&args, &sb, SV(" "));
-
         ok = run_eval(&vm, stdout, SV(sb), &ctx);
-
         str_free(&sb);
     }
     else

@@ -534,3 +534,53 @@ void value_render(Value *v, String *sb, RenderCtx *ctx)
         default:          UNREACHABLE();
     }
 }
+
+static void render_symbol_id(String *sb, StringView id, size_t max_len, RenderCtx *ctx)
+{
+    str_append(sb, "    ");
+
+    appendc(ACOLOR_CYAN);
+    str_append(sb, id);
+    for (size_t i = 0; i < max_len - id.len; i++)
+        str_append(sb, " ");
+
+    appendc(AFMT_RESET AFMT_DIM);
+    str_append(sb, " = ");
+    appendc(AFMT_RESET);
+}
+
+void scope_render(Scope *s, Value *ans, String *sb, RenderCtx *ctx)
+{
+    if (s->len == 0 && !ans)
+    {
+        appendc(ACOLOR_CYAN);
+        str_appendf(sb, "Empty.\n");
+        appendc(AFMT_RESET);
+        return;
+    }
+
+    size_t max_len = ans ? 3 : 0;
+    DA_FOR(s, i)
+    {
+        size_t len = da_at(s, i).id->len;
+        if (len > max_len) max_len = len;
+    }
+
+    if (ans)
+    {
+        appendc(AFMT_RESET);
+        render_symbol_id(sb, SV("ans"), max_len, ctx);
+        value_render(ans, sb, ctx);
+        str_append(sb, "\n");
+    }
+
+    DA_FOR(s, i)
+    {
+        Symbol sym = da_at(s, i);
+        render_symbol_id(sb,SV(sym.id), max_len, ctx);
+        value_render(sym.value, sb, ctx);
+        str_append(sb, "\n");
+    }
+
+    appendc(AFMT_RESET);
+}

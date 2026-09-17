@@ -52,9 +52,11 @@ const char cli_help[] =  "Commands:\n"
 ;
 
 const char repl_help[] = "Commands:\n"
-                         "    :h, :help                   show this help\n"
-                         "    :q, :quit                   exit the REPL\n"
-                         "    :s, :set                    set options for the REPL\n"
+                         "    :h | :help                  show this help\n"
+                         "    :q | :quit                  exit the REPL\n"
+                         "    :e | :env                   show current environment\n"
+                         "    :c | :clear                 clear current environment\n"
+                         "    :s | :set                   set options for the REPL\n"
                          "\n"
                          OPTIONS_REPL
                          "\n"
@@ -205,6 +207,11 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
         vm_env_render(vm, &sb, ctx);
         printf(SV_FMT, SV_ARG(SV(sb)));
         str_free(&sb);
+    }
+    else if (sv_equal(cmd, "c") || sv_equal(cmd, "clear"))
+    {
+        vm_reset(vm);
+        printf("Cleared.\n");
     }
     else if (sv_equal(cmd, "s") || sv_equal(cmd, "set"))
     {

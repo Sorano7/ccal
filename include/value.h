@@ -146,5 +146,6 @@ typedef struct
 } RenderCtx;
 
 void value_render(Value *v, String *sb, RenderCtx *ctx);
+void scope_render(Scope *s, Value *ans, String *sb, RenderCtx *ctx);
 
 #endif

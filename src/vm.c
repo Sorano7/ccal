@@ -57,6 +57,7 @@ static Value *eval_builtin(VM *v, const Expr *e, BuiltinKind b)
 
         case BUILTIN_TRUE:
         case BUILTIN_FALSE:
+        case BUILTIN_MOD:
         case BUILTIN_POW:
         case BUILTIN_LOG:  return value_builtin(e->span, b, 2); break;
 
@@ -192,7 +193,7 @@ static Value *eval_builtin_bool(Value *f, Value *arg)
     return value_retain(da_at(&f->as.builtin.args, 0));
 }
 
-#define AS_REAL(val, cr) do { \
+#define ENSURE_REAL(val, cr) do { \
     switch ((val)->kind) { \
         case VAL_REAL:  (cr) = cr_retain((val)->as.real);    break; \
         case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
@@ -204,21 +205,17 @@ static Value *eval_builtin_bool(Value *f, Value *arg)
 static Value *eval_builtin_real_unary(CRUnary fn, const Value *arg)
 {
     CR *x = NULL;
-    AS_REAL(arg, x);
+    ENSURE_REAL(arg, x);
+    if (cr_is_error(x))
+        return value_error_from_cr(arg->span, x);
 
     Value *out = NULL;
-    if (cr_is_error(x))
-    {
-        out = value_error_from_cr(arg->span, x);
-    }
+
+    CR *n = fn(x);
+    if (cr_is_error(n))
+        out = value_error_from_cr(arg->span, n);
     else
-    {
-        CR *n = fn(x);
-        if (cr_is_error(n))
-            out = value_error_from_cr(arg->span, n);
-        else
-            out = value_real(arg->span, fn(x));
-    }
+        out = value_real(arg->span, fn(x));
 
     cr_release(&x);
     return out;
@@ -233,13 +230,13 @@ static Value *eval_builtin_real_binary(const Value *f, CRBinary fn, const Value 
     Span span = {left->span.from, right->span.to};
 
     CR *l = NULL, *r = NULL;
-    AS_REAL(left, l);
+    ENSURE_REAL(left, l);
     if (cr_is_error(l))
     {
         out = value_error_from_cr(span, l);
         goto done;
     }
-    AS_REAL(right, r);
+    ENSURE_REAL(right, r);
     if (cr_is_error(r))
     {
         out = value_error_from_cr(span, r);
@@ -276,6 +273,7 @@ static Value *eval_builtin_apply(Value *f, Value *arg)
         case BUILTIN_LN:    return eval_builtin_real_unary(cr_ln, arg);
         case BUILTIN_POW:   return eval_builtin_real_binary(f, cr_pow, arg);
         case BUILTIN_LOG:   return eval_builtin_real_binary(f, cr_log, arg);
+        case BUILTIN_MOD:   return eval_builtin_real_binary(f, cr_mod, arg);
 
         case BUILTIN_HOLE:  return value_error_value_kind_s(f, SV("lambda"));
         case BUILTIN_ANS:
@@ -310,56 +308,8 @@ static Value *eval_apply(VM *v, const Expr *f, const Expr *a)
     return out;
 }
 
-
-// Perform an mpq infix operation on two numbers wrapped in value.
-#define MPQ_INFIX(f, out, l, r) f((out)->as.exact, (l)->as.exact, (r)->as.exact)
-
 // Compare two numbers wrapped in value.
 #define MPQ_CMP(l, r) mpq_cmp((l)->as.exact, (r)->as.exact)
-
-// Evaluate one number raised to the power of the other.
-static Value *eval_exact_power(const Value *l, const Value *r)
-{
-    Value *out = NULL;
-    Span s = {l->span.from, r->span.to};
-
-    bool non_int = mpz_cmp_ui(mpq_denref(r->as.exact), 1) != 0;
-    bool fit_ul = false;
-    bool can_render = false;
-    if (!non_int)
-    {
-        fit_ul = mpz_fits_ulong_p(mpq_numref(r->as.exact));
-        can_render = bit_estimate_mpq(l->as.exact, r->as.exact) < RENDER_BITS_MAX;
-    }
-
-    if (non_int || !fit_ul || !can_render)
-    {
-        CR *b = cr_from_mpq(l->as.exact);
-        CR *x = cr_from_mpq(r->as.exact);
-        CR *n = cr_pow(b, x);
-        cr_release(&b);
-        cr_release(&x);
-
-        if (cr_is_error(n))
-        {
-            out = value_error_from_cr(r->span, n);
-            cr_release(&n);
-        }
-        else
-        {
-            out = value_real(s, n);
-        }
-        return out;
-    }
-
-    out = value_exact(s, l->as.exact);
-
-    unsigned long exp = mpz_get_ui(mpq_numref(r->as.exact));
-    mpz_pow_ui(mpq_numref(out->as.exact), mpq_numref(l->as.exact), exp);
-    mpz_pow_ui(mpq_denref(out->as.exact), mpq_denref(l->as.exact), exp);
-    mpq_canonicalize(out->as.exact);
-    return out;
-}
 
 // Evaluate comparison and equality between exact values.
 static Value *eval_exact_bool_infix(const Value *l, const Expr *e, const Value *r)
@@ -397,13 +347,82 @@ static bool op_is_cmp_or_eq(Operator op)
     }
 }
 
+static Value *eval_exact_power(const Value *l, const Value *r)
+{
+    Value *out = NULL;
+    Span s = {l->span.from, r->span.to};
+
+    bool is_int = mpz_cmp_ui(mpq_denref(r->as.exact), 1) == 0;
+    bool fit_ul = mpz_fits_ulong_p(mpq_numref(r->as.exact));
+    bool can_render = bit_estimate_mpq(l->as.exact, r->as.exact) < RENDER_BITS_MAX;
+
+    if (is_int && fit_ul && can_render)
+    {
+        out = value_exact(s, l->as.exact);
+        unsigned long exp = mpz_get_ui(mpq_numref(r->as.exact));
+        mpz_pow_ui(mpq_numref(out->as.exact), mpq_numref(l->as.exact), exp);
+        mpz_pow_ui(mpq_denref(out->as.exact), mpq_denref(l->as.exact), exp);
+        mpq_canonicalize(out->as.exact);
+        return out;
+    }
+
+    CR *b = cr_from_mpq(l->as.exact);
+    CR *x = cr_from_mpq(r->as.exact);
+    CR *n = cr_pow(b, x);
+    cr_release(&b);
+    cr_release(&x);
+
+    if (cr_is_error(n))
+    {
+        out = value_error_from_cr(r->span, n);
+        cr_release(&n);
+    }
+    else
+    {
+        out = value_real(s, n);
+    }
+    return out;
+}
+
+static Value *eval_exact_modulo(const Value *l, const Expr *e, const Value *r)
+{
+    if (mpq_cmp_ui(r->as.exact, 0, 1) == 0)
+        return value_errorf(r->span, "Modulo by zero");
+
+    mpq_t result, q, nb;
+    mpz_t n;
+
+    mpq_inits(result, q, nb, NULL);
+    mpz_init(n);
+
+    mpq_div(q, l->as.exact, r->as.exact);
+    mpz_fdiv_q(n, mpq_numref(q), mpq_denref(q));
+
+    mpq_set_z(nb, n);
+    mpq_mul(nb, nb, r->as.exact);
+    mpq_sub(result, l->as.exact, nb);
+
+    Value *out = value_exact(e->span, result);
+
+    mpq_clears(result, q, nb, NULL);
+    mpz_clear(n);
+    return out;
+}
+
+// Perform an mpq infix operation on two numbers wrapped in value.
+#define MPQ_INFIX(f, out, l, r) f((out)->as.exact, (l)->as.exact, (r)->as.exact)
+
 // Evaluate an infix operation between two exact numbers.
 static Value *eval_exact_infix(const Value *l, const Expr *e, const Value *r)
 {
     if (e->as.infix.op == OP_POW)
         return eval_exact_power(l, r);
+    if (e->as.infix.op == OP_MOD)
+        return eval_exact_modulo(l, e, r);
+
     if (op_is_cmp_or_eq(e->as.infix.op))
         return eval_exact_bool_infix(l, e, r);
+
 
     Value *out = value_exact(e->span, l->as.exact);
     switch (e->as.infix.op)
@@ -446,13 +465,18 @@ static Value *eval_real_infix(const Value *l, const Expr *e, const Value *r)
     if (op_is_cmp_or_eq(e->as.infix.op))
         return eval_real_bool_infix(l, e, r);
 
+    CR *a = l->as.real;
+    CR *b = r->as.real;
+
     CR *n = NULL;
     switch (e->as.infix.op)
     {
-        case OP_ADD: n = cr_add(l->as.real, r->as.real); break;
-        case OP_SUB: n = cr_sub(l->as.real, r->as.real); break;
-        case OP_MUL: n = cr_mul(l->as.real, r->as.real); break;
-        case OP_DIV: n = cr_div(l->as.real, r->as.real); break;
+        case OP_ADD: n = cr_add(a, b); break;
+        case OP_SUB: n = cr_sub(a, b); break;
+        case OP_MUL: n = cr_mul(a, b); break;
+        case OP_DIV: n = cr_div(a, b); break;
+        case OP_POW: n = cr_pow(a, b); break;
+        case OP_MOD: n = cr_mod(a, b); break;
 
         default:     return value_error_undefined_op(l, e, r);
     }

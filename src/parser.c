@@ -51,6 +51,7 @@ static OpPrec token_prec(Token t)
 
         case TOK_STAR:
         case TOK_SLASH:
+        case TOK_PERCENT:
             return PREC_PRODUCT;
 
         case TOK_CARET:

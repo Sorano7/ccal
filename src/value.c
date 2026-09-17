@@ -189,6 +189,7 @@ const char *builtin_to_str[] = {
     [BUILTIN_ANS]   = "ans",
     [BUILTIN_PI]    = "pi",
     [BUILTIN_E]     = "e",
+    [BUILTIN_MOD]   = "mod",
     [BUILTIN_SQRT]  = "sqrt",
     [BUILTIN_POW]   = "pow",
     [BUILTIN_EXP]   = "exp",
@@ -209,6 +210,7 @@ BuiltinKind builtin_kind(const Expr *e)
     if (sv_equal(name, "ans"))   return BUILTIN_ANS;
     if (sv_equal(name, "pi"))    return BUILTIN_PI;
     if (sv_equal(name, "e"))     return BUILTIN_E;
+    if (sv_equal(name, "mod"))   return BUILTIN_MOD;
     if (sv_equal(name, "sqrt"))  return BUILTIN_SQRT;
     if (sv_equal(name, "pow"))   return BUILTIN_POW;
     if (sv_equal(name, "exp"))   return BUILTIN_EXP;

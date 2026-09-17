@@ -18,6 +18,7 @@ typedef struct
     X(OP_MUL,    "*") \
     X(OP_DIV,    "/") \
     X(OP_POW,    "^") \
+    X(OP_MOD,    "%") \
 \
     X(OP_NEG,    "-") \
 \

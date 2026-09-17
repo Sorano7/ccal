@@ -31,6 +31,7 @@ typedef enum
     BUILTIN_TRUE,
     BUILTIN_FALSE,
 
+    BUILTIN_MOD,
     BUILTIN_SQRT,
 
     BUILTIN_POW,

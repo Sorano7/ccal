@@ -6,25 +6,26 @@ Operator token_to_op(Token t)
 {
     switch (t.kind)
     {
-        case TOK_EQ:     return OP_EQ;
-        case TOK_NEQ:    return OP_NEQ;
-        case TOK_APPROX: return OP_APPROX;
+        case TOK_EQ:      return OP_EQ;
+        case TOK_NEQ:     return OP_NEQ;
+        case TOK_APPROX:  return OP_APPROX;
 
-        case TOK_LT:     return OP_LT;
-        case TOK_LEQ:    return OP_LEQ;
-        case TOK_GT:     return OP_GT;
-        case TOK_GEQ:    return OP_GEQ;
+        case TOK_LT:      return OP_LT;
+        case TOK_LEQ:     return OP_LEQ;
+        case TOK_GT:      return OP_GT;
+        case TOK_GEQ:     return OP_GEQ;
 
-        case TOK_PLUS:   return OP_ADD;
-        case TOK_MINUS:  return OP_SUB;
-        case TOK_STAR:   return OP_MUL;
-        case TOK_SLASH:  return OP_DIV;
-        case TOK_CARET:  return OP_POW;
+        case TOK_PLUS:    return OP_ADD;
+        case TOK_MINUS:   return OP_SUB;
+        case TOK_STAR:    return OP_MUL;
+        case TOK_SLASH:   return OP_DIV;
+        case TOK_CARET:   return OP_POW;
+        case TOK_PERCENT: return OP_MOD;
 
-        case TOK_ASSIGN: return OP_ASSIGN;
-        case TOK_DOLLAR: return OP_PIPE;
+        case TOK_ASSIGN:  return OP_ASSIGN;
+        case TOK_DOLLAR:  return OP_PIPE;
 
-        default:         return OP_NIL;
+        default:          return OP_NIL;
     }
 }
 
@@ -57,6 +58,7 @@ static TokenKind token_kind_get(StringView src)
         case '*':  return TOK_STAR;
         case '/':  return TOK_SLASH;
         case '^':  return TOK_CARET;
+        case '%':  return TOK_PERCENT;
 
         case '.':  return TOK_DOT;
         case ',':  return TOK_COMMA;

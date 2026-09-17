@@ -23,6 +23,7 @@ CR *cr_add(CR *a, CR *b);
 CR *cr_sub(CR *a, CR *b);
 CR *cr_mul(CR *a, CR *b);
 CR *cr_div(CR *a, CR *b);
+CR *cr_mod(CR *a, CR *b);
 
 CR *cr_neg(CR *a);
 CR *cr_sqrt(CR *a);

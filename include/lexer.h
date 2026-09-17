@@ -23,6 +23,7 @@
     X(TOK_STAR,      "*") \
     X(TOK_SLASH,     "/") \
     X(TOK_CARET,     "^") \
+    X(TOK_PERCENT,   "%") \
 \
     X(TOK_GT,        ">") \
     X(TOK_GEQ,       ">=") \

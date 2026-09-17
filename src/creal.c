@@ -21,6 +21,7 @@ typedef enum
     CR_OP_SUB,
     CR_OP_MUL,
     CR_OP_DIV,
+    CR_OP_MOD,
 
     CR_OP_NEG,
     CR_OP_SQRT,
@@ -148,6 +149,13 @@ CR *cr_div(CR *a, CR *b)
     if (cr_sign(b) == 0)
         return cr_error("Division by zero");
     return cr_new_binary(CR_OP_DIV, a, b);
+}
+
+CR *cr_mod(CR *a, CR *b)
+{
+    if (cr_sign(b) == 0)
+        return cr_error("Modulo by zero");
+    return cr_new_binary(CR_OP_MOD, a, b);
 }
 
 CR *cr_neg(CR *a)
@@ -285,6 +293,54 @@ static void cr_e_eval(mp_prec_t p, mpfi_t out)
     mpfr_clears(lo, hi, NULL);
 }
 
+static void cr_mod_eval(CR *n, mpfr_prec_t p, mpfi_t out)
+{
+    mpfi_t a, b;
+    mpfi_inits2(p, a, b, NULL);
+    cr_eval(n->node.l, p, a);
+    cr_eval(n->node.r, p, b);
+
+    mpfi_t q;
+    mpfr_t qlo, qhi, nlo, nhi;
+
+    mpfi_init2(q, p);
+    mpfr_inits2(p, qlo, qhi, nlo, nhi, NULL);
+
+    mpfi_div(q, a, b);
+    mpfi_get_left(qlo, q);
+    mpfi_get_right(qhi, q);
+    mpfr_floor(nlo, qlo);
+    mpfr_floor(nhi, qhi);
+
+    if (mpfr_equal_p(nlo, nhi))
+    {
+        mpfi_t n, nb;
+        mpfi_inits2(p, n, nb, NULL);
+        mpfi_set_fr(n, nlo);
+        mpfi_mul(nb, n, b);
+        mpfi_sub(out, a, nb);
+        mpfi_clears(n, nb, NULL);
+    }
+    else
+    {
+        mpfi_t absb;
+        mpfr_t zero, sup;
+        mpfi_init2(absb, p);
+        mpfr_inits2(p, zero, sup, NULL);
+
+        mpfi_abs(absb, b);
+        mpfr_set_zero(zero, 1);
+        mpfi_get_right(sup, absb);
+        mpfi_interv_fr(out, zero, sup);
+
+        mpfr_clears(zero, sup, NULL);
+        mpfi_clear(absb);
+    }
+
+    mpfi_clear(q);
+    mpfr_clears(qlo, qhi, nlo, nhi, NULL);
+}
+
 #define MPFI_BINARY(fn) do { \
     mpfi_t li, ri; \
     mpfi_inits2(p, li, ri, NULL); \
@@ -330,6 +386,8 @@ void cr_eval(CR *n, mp_prec_t target_prec, mpfi_t result)
             case CR_OP_SUB:        MPFI_BINARY(mpfi_sub);       break;
             case CR_OP_MUL:        MPFI_BINARY(mpfi_mul);       break;
             case CR_OP_DIV:        MPFI_BINARY(mpfi_div);       break;
+
+            case CR_OP_MOD:        cr_mod_eval(n, p, out);      break;
 
             case CR_OP_NEG:        MPFI_UNARY(mpfi_neg);        break;
             case CR_OP_SQRT:       MPFI_UNARY(mpfi_sqrt);       break;

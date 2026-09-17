@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 - Multi-line support for REPL.
 - REPL command to clear the session.
 - CLI subcommand to run a script.
+- Modulo operator and builtin lambda.
 
 ### Changed
 - Lambda literal now must be inside parenthesis unless on the right of assignment or is lambda body.

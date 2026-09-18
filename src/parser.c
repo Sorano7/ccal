@@ -1,6 +1,7 @@
 #include "parser.h"
 #include "lexer.h"
 #include "number.h"
+#include "value.h"
 
 #include <errno.h>
 
@@ -8,6 +9,7 @@
 typedef enum
 {
     PREC_PRIMARY,
+    PREC_PIPE,
 
     PREC_COND,
 
@@ -61,6 +63,8 @@ static OpPrec token_prec(Token t)
             return PREC_ASSIGN;
 
         case TOK_DOLLAR:
+            return PREC_PIPE;
+
         case TOK_INFIX_ID:
             return PREC_APPLY;
 
@@ -372,6 +376,53 @@ static Expr *parse_lambda_or_expr(Parser *p, int prec)
     return parse_expr(p, prec);
 }
 
+static Expr *parse_guards(Parser *p)
+{
+    Expr *out = NULL;
+    bool has_else = false;
+
+    for (;;)
+    {
+        MUST_CONSUME(p, TOK_BAR);
+
+        Expr *cond = parse_expr(p, PREC_PRIMARY);
+        if (!expr_ok(cond))
+        {
+            if (out) expr_destroy(&out);
+            return cond;
+        }
+
+        MUST_CONSUME(p, TOK_ARROW);
+        skip_newlines(p);
+
+        Expr *then = parse_expr(p, PREC_PRIMARY);
+        if (!expr_ok(then))
+        {
+            if (out) expr_destroy(&out);
+            return then;
+        }
+
+        if (builtin_kind(cond) == BUILTIN_HOLE)
+        {
+            has_else = true;
+            expr_destroy(&cond);
+            expr_guard_add(out, NULL, then);
+        }
+
+        out = expr_guard_add(out, cond, then);
+
+        skip_newlines(p);
+        if (tkind(p) != TOK_BAR) break;
+    }
+
+    if (!out || !has_else) 
+    {
+        if (out) expr_destroy(&out);
+        return expr_incomplete(tspan(p));
+    }
+    return out;
+}
+
 // Parse a lambda expression.
 static Expr *parse_lambda(Parser *p)
 {
@@ -381,7 +432,11 @@ static Expr *parse_lambda(Parser *p)
     MUST_CONSUME(p, TOK_COLON);
     skip_newlines(p);
 
-    Expr *body = parse_lambda_or_expr(p, PREC_PRIMARY);
+    Expr *body = NULL;
+    if (tkind(p) == TOK_BAR)
+        body = parse_guards(p);
+    else
+        body = parse_lambda_or_expr(p, PREC_PRIMARY);
     if (!expr_ok(body)) return body;
 
     return expr_lambda(id, body);

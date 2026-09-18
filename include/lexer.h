@@ -51,7 +51,9 @@
     X(TOK_DOLLAR,    "$") \
     X(TOK_QUESTION,  "?") \
     X(TOK_BACKTICK,  "`") \
-    X(TOK_DDASH,     "--")
+    X(TOK_DDASH,     "--") \
+    X(TOK_BAR,       "|") \
+    X(TOK_ARROW,     "->")
 
 #define AS_ENUM(name, _) name,
 #define AS_STR(name, s)  [name] = (s),

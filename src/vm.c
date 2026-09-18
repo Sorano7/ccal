@@ -740,7 +740,11 @@ Value *vm_run_next(VM *v, StringView src, size_t offset)
         if (line.len == 0) continue;
 
         Expr *e = parse_line(sv_trim(line), v->base, offset);
-        if (!e) continue;
+        if (!e)
+        {
+            out = value_void((Span){0});
+            continue;
+        }
         out = vm_run_expr(v, e);
         expr_destroy(&e);
 
@@ -753,6 +757,7 @@ Value *vm_run_next(VM *v, StringView src, size_t offset)
     }
 
     da_free(&exprs);
+    DEV_MUST(out);
     return out;
 }
 
@@ -783,18 +788,22 @@ Value *vm_run(VM *v, StringView input, Source *src)
             str_append(&in, line);
         }
 
-        out = vm_run_next(v, SV(in), offset);
+        Value *next = vm_run_next(v, SV(in), offset);
+        if (next && next->kind != VAL_VOID)
+            out = next;
+
         if (src) source_append_line(src, line);
 
         if (value_is_err(out)) break;
 
         if (i < lines.len-1)
-            value_release(&out);
+            value_release(&next);
 
         str_reset(&in);
     }
 
     str_free(&in);
     da_free(&lines);
+    if (!out) out = value_void((Span){0});
     return out;
 }

@@ -75,13 +75,16 @@ static TokenKind token_kind_get(StringView src)
         case '?':  return TOK_QUESTION;
         case '\'': return TOK_SQUOTE;
         case '`':  return TOK_BACKTICK;
+        case '|':  return TOK_BAR;
 
         case ';':  return TOK_SEMICOLON;
         case '\n': return TOK_NEWLINE;
         case '\0': return TOK_EOF;
 
         case '-':
-            return next == '-' ? TOK_DDASH : TOK_MINUS;
+            if (next == '-') return TOK_DDASH;
+            if (next == '>') return TOK_ARROW;
+            return TOK_MINUS;
 
         case '=':
             return next == '=' ? TOK_EQ : TOK_ASSIGN;
@@ -116,6 +119,7 @@ static size_t token_len(TokenKind kind)
         case TOK_LEQ:
         case TOK_GEQ:
         case TOK_DDASH:
+        case TOK_ARROW:
             return 2;
 
         default:

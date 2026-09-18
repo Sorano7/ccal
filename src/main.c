@@ -237,6 +237,7 @@ static bool read_logical_line(VM *vm, String *sb)
     {
         char *line = readline(prompt);
         if (!line) return false;
+        add_history(line);
 
         prompt = "..... ";
 
@@ -269,6 +270,7 @@ static bool read_logical_line(VM *vm, String *sb)
 void repl_start(VM *vm, RenderCtx *ctx)
 {
     rl_bind_key('\014', clear_screen);
+    rl_bind_key('\t', rl_insert);
 
     Source src;
     source_init(&src);
@@ -287,7 +289,6 @@ void repl_start(VM *vm, RenderCtx *ctx)
 
         if (sb.len == 0) continue;
 
-        add_history(sb.data);
         str_append(&sb, "\n");
         source_append_line(&src, SV(sb));
 

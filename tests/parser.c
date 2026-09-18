@@ -508,6 +508,28 @@ TEST(parse_conditional)
     expr_destroy(&e);
 }
 
+TEST(parse_guards)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "('x: | 1 -> 2 | 3 -> 4 | '_ -> 5)", 10);
+    EXPR_CHECK(e,
+            expr_lambda(
+                expr_id((Span){0}, SV("x")),
+                expr_cond(
+                    expr_number_ui((Span){0}, 1, 1),
+                    expr_number_ui((Span){0}, 2, 1),
+                    expr_cond(
+                        expr_number_ui((Span){0}, 3, 1),
+                        expr_number_ui((Span){0}, 4, 1),
+                        expr_number_ui((Span){0}, 5, 1)
+                        )
+                    )
+                ));
+
+    expr_destroy(&e);
+}
+
 TEST(parse_identifier_as_infix)
 {
     Expr *e = NULL;

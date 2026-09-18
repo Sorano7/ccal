@@ -119,6 +119,8 @@ Expr *expr_prefix(Span start, Operator op, Expr *expr);
 Expr *expr_lambda(Expr *id, Expr *body);
 Expr *expr_cond(Expr *if_, Expr *then, Expr *else_);
 
+Expr *expr_guard_add(Expr *current, Expr *cond, Expr *then);
+
 Expr *expr_clone(const Expr *e);
 
 bool expr_equal(const Expr *a, const Expr *b);

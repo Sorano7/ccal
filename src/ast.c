@@ -159,6 +159,32 @@ Expr *expr_cond(Expr *if_, Expr *then, Expr *else_)
     return e;
 }
 
+Expr *expr_guard_add(Expr *current, Expr *cond, Expr *then)
+{
+    Expr *e = then;
+    if (cond)
+    {
+        e = expr_new(EXPR_COND, (Span){cond->span.from, then->span.to});
+        e->as.cond.if_ = cond;
+        e->as.cond.then = then;
+        e->as.cond.else_ = NULL;
+    }
+
+    if (!current) return e;
+
+    Expr *out = current;
+    for (;;)
+    {
+        DEV_MUST(current->kind == EXPR_COND);
+        Expr *else_ = current->as.cond.else_;
+        if (!else_ || else_->kind != EXPR_COND) break;
+        current = else_;
+    }
+
+    current->as.cond.else_ = e;
+    return out;
+}
+
 // Create a deep clone of the expression.
 Expr *expr_clone(const Expr *e)
 {

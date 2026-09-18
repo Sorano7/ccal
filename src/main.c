@@ -212,6 +212,7 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
     else if (sv_equal(cmd, "c") || sv_equal(cmd, "clear"))
     {
         vm_reset(vm);
+        source_reset(ctx->src);
         printf("Cleared.\n");
     }
     else if (sv_equal(cmd, "s") || sv_equal(cmd, "set"))
@@ -228,6 +229,42 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
     return should_continue;
 }
 
+static bool read_logical_line(VM *vm, String *sb)
+{
+    const char *prompt = "ccal> ";
+
+    for (;;)
+    {
+        char *line = readline(prompt);
+        if (!line) return false;
+
+        prompt = "..... ";
+
+        StringView part = SV(line);
+        if (part.len == 0) break;
+
+        str_append(sb, part);
+        free(line);
+
+        if (sv_endswith(SV(sb), SV(";")))
+        {
+            continue;
+        }
+        if (sv_endswith(SV(sb), SV("\\")))
+        {
+            sb->len--;
+            continue;
+        }
+        if (!vm_is_complete(vm, SV(sb)))
+        {
+            str_append(sb, "\n");
+            continue;
+        }
+        break;
+    }
+    return true;
+}
+
 // Start interactive REPL.
 void repl_start(VM *vm, RenderCtx *ctx)
 {
@@ -237,78 +274,46 @@ void repl_start(VM *vm, RenderCtx *ctx)
     source_init(&src);
     ctx->src = &src;
 
-    String in, out;
-    str_reserve(&in, 256);
-    str_reserve(&out, 256);
-
-    char *line;
+    String sb;
+    str_reserve(&sb, 256);
 
     for (;;)
     {
-        const char *prompt = "ccal> ";
-
         size_t offset = source_get_offset(&src);
 
-        for (;;)
-        {
-            line = readline(prompt);
-            if (!line) goto exit;
+        str_reset(&sb);
+        if (!read_logical_line(vm, &sb))
+            goto exit;
 
-            prompt = "..... ";
+        if (sb.len == 0) continue;
 
-            StringView part = SV(line);
-            if (part.len == 0) break;
+        add_history(sb.data);
+        str_append(&sb, "\n");
+        source_append_line(&src, SV(sb));
 
-            str_append(&in, part);
-            free(line);
+        StringView input = SV(sb);
 
-            if (sv_endswith(SV(in), SV(";")))
-            {
-                continue;
-            }
-            if (sv_endswith(SV(in), SV("\\")))
-            {
-                in.len--;
-                continue;
-            }
-            if (!vm_is_complete(vm, SV(in)))
-            {
-                str_append(&in, "\n");
-                continue;
-            }
-            break;
-        }
-
-        if (in.len == 0) continue;
-
-        add_history(in.data);
-        str_append(&in, "\n");
-        source_append_line(&src, SV(in));
-
-        StringView input = SV(in);
         if (sv_startswith(input, SV(":")))
         {
             sv_shift(&input, 1);
             if (!repl_handle_command(vm, ctx, input))
                 break;
 
-            str_reset(&in);
+            str_reset(&sb);
             continue;
         }
 
         Value *result = vm_run_next(vm, input, offset);
-        value_render(result, &out, ctx);
+
+        str_reset(&sb);
+        value_render(result, &sb, ctx);
         value_release(&result);
 
-        printf(SV_FMT"\n", SV_ARG(SV(out)));
-
-        str_reset(&in);
-        str_reset(&out);
+        printf(SV_FMT"\n", SV_ARG(SV(sb)));
     }
 
 exit:
-    str_free(&in);
-    str_free(&out);
+    str_free(&sb);
     source_free(&src);
 
     printc(ACOLOR_CYAN, "Exit.\n");

@@ -133,6 +133,7 @@ typedef struct
 
 void source_init(Source *s);
 void source_free(Source *s);
+void source_reset(Source *s);
 
 void source_append_line(Source *s, StringView line);
 bool source_get_line(Source *s, Span target, Span *out_span, String *sb);

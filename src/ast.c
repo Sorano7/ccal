@@ -340,6 +340,12 @@ void source_free(Source *s)
     da_free(s);
 }
 
+void source_reset(Source *s)
+{
+    str_reset(&s->buf);
+    da_reset(s);
+}
+
 void source_append_line(Source *s, StringView line)
 {
     Span span = {s->buf.len, s->buf.len + line.len};

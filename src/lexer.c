@@ -78,6 +78,7 @@ static TokenKind token_kind_get(StringView src)
 
         case ';':  return TOK_SEMICOLON;
         case '\n': return TOK_NEWLINE;
+        case '\0': return TOK_EOF;
 
         case '-':
             return next == '-' ? TOK_DDASH : TOK_MINUS;
@@ -302,6 +303,9 @@ bool tokenize(TokenList *tl, StringView src, size_t offset)
         bool ok = true;
         bool append = true;
 
+        if (kind == TOK_EOF)
+            break;
+
         if (kind == TOK_SPACE)
         {
             while (i < src.len)
@@ -321,7 +325,7 @@ bool tokenize(TokenList *tl, StringView src, size_t offset)
         switch (kind)
         {
             case TOK_INVALID:
-                token_errorf(&t, span, "Invalid token");
+                token_errorf(&t, span, "Invalid token: '%c'", src.data[i]);
                 ok = false;
                 break;
 

@@ -32,6 +32,9 @@ void expr_destroy(Expr **ep)
     Expr *e = *ep;
     switch (e->kind)
     {
+        case EXPR_INCOMPLETE:
+            break;
+
         case EXPR_ERROR:
             str_free(&e->as.err);
             break;
@@ -69,6 +72,11 @@ void expr_destroy(Expr **ep)
     }
     free(*ep);
     *ep = NULL;
+}
+
+Expr *expr_incomplete(Span span)
+{
+    return expr_new(EXPR_INCOMPLETE, span);
 }
 
 // Allocate an error expression with span and message.
@@ -373,6 +381,8 @@ static bool find_span(Source *s, Span query, Span *out)
 
 bool source_get_line(Source *s, Span target, Span *out_span, String *sb)
 {
+    if (s->len == 0) return false;
+
     Span line_span = {0};
     if (!find_span(s, target, &line_span))
         return false;

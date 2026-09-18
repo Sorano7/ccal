@@ -16,6 +16,7 @@ void vm_init(VM *v);
 void vm_reset(VM *v);
 void vm_free(VM *v);
 
+bool vm_is_complete(VM *v, StringView src);
 Value *vm_run_next(VM *v, StringView line, size_t offset);
 Value *vm_run(VM *v, StringView input, Source *src);
 

@@ -5,9 +5,9 @@
 #include "ast.h"
 
 #define TOKENS(X) \
-    X(TOK_EOF,       "EOF") \
+    X(TOK_EOF,       "<eof>") \
     X(TOK_SPACE,     " ") \
-    X(TOK_NEWLINE,   "\n") \
+    X(TOK_NEWLINE,   "<newline>") \
     X(TOK_SEMICOLON, ";") \
     X(TOK_INVALID,   "<invalid>") \
     X(TOK_ERROR,     "<error>") \

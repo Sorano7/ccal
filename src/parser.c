@@ -103,17 +103,27 @@ typedef struct
 
 #define peek(p, n)  (p)->tl->data[AT_OR_LAST((p), (p)->pos + (n))]
 #define token(p)    peek(p, 0)
-#define tprec(p)    token_prec(token(p))
 #define tkind(p)    token(p).kind
 #define tspan(p)    token(p).span
 #define is_alnum(p) (tkind(p) == TOK_ALNUM || tkind(p) == TOK_DIGIT)
 #define is_dlist(p) (tkind(p) == TOK_LBRAC)
 #define is_sexpr(p) (is_alnum(p) || is_dlist(p) || tkind(p) == TOK_LPAREN)
 
-#define CONSUME_EXPECT(p, k) do { \
+#define MUST_CONSUME(p, k) do { \
     if (tkind(p) != k) \
         return expr_err(tspan(p), "Expected '%s'", tk_to_str[k]); \
     (p)->pos++; \
+} while (0)
+
+#define SHOULD_CONSUME(p, k) do { \
+    if (tkind(p) != (k)) \
+        return expr_incomplete(tspan(p)); \
+    (p)->pos++; \
+} while (0)
+
+#define skip_newlines(p) do { \
+    while (tkind(p) == TOK_NEWLINE) \
+        (p)->pos++; \
 } while (0)
 
 // Return if the next expression is nud.
@@ -135,6 +145,15 @@ static inline bool is_nud(Parser *p)
         default:
             return false;
     }
+}
+
+static inline Token next_real_token(Parser *p)
+{
+    size_t prev = p->pos;
+    skip_newlines(p);
+    Token t = token(p);
+    p->pos = prev;
+    return t;
 }
 
 static Expr *parse_expr(Parser *p, int prec);
@@ -192,7 +211,7 @@ static Expr *parse_number_part_dlist(Parser *p, DigitArray *ds, Span *out)
     if (!is_dlist(p))
         return expr_err(s, "Expected digit list");
 
-    CONSUME_EXPECT(p, TOK_LBRAC);
+    MUST_CONSUME(p, TOK_LBRAC);
         for (;;)
         {
             t = token(p);
@@ -207,10 +226,10 @@ static Expr *parse_number_part_dlist(Parser *p, DigitArray *ds, Span *out)
             p->pos++;
 
             if (tkind(p) == TOK_RBRAC) break;
-            CONSUME_EXPECT(p, TOK_COMMA);
+            MUST_CONSUME(p, TOK_COMMA);
         }
         out->to = tspan(p).to;
-    CONSUME_EXPECT(p, TOK_RBRAC);
+    SHOULD_CONSUME(p, TOK_RBRAC);
     return NULL;
 }
 
@@ -227,7 +246,7 @@ static Expr *parse_number_part(Parser *p, DigitArray *ds, DigitFormat fmt, bool 
             return parse_number_part_dlist(p, ds, out);
 
         default:
-            return expr_err(tspan(p), "Expected number");
+            UNREACHABLE();
     }
 }
 
@@ -304,8 +323,8 @@ static Expr *parse_base_tag(Parser *p)
     Token t = token(p);
     Span s = t.span;
 
-    CONSUME_EXPECT(p, TOK_DIGIT);
-    CONSUME_EXPECT(p, TOK_HASH);
+    MUST_CONSUME(p, TOK_DIGIT);
+    MUST_CONSUME(p, TOK_HASH);
 
     unsigned long prev_base = p->base;
 
@@ -325,13 +344,13 @@ static Expr *parse_base_tag(Parser *p)
 static Expr *parse_neg(Parser *p)
 {
     Span s = tspan(p);
-    CONSUME_EXPECT(p, TOK_MINUS);
+    MUST_CONSUME(p, TOK_MINUS);
 
     if (!is_sexpr(p))
         return expr_err(tspan(p), "Expected number or group");
 
     Expr *e = parse_expr(p, PREC_PREFIX);
-    if (expr_is_err(e)) return e;
+    if (!expr_ok(e)) return e;
 
     return expr_prefix(s, OP_NEG, e);
 }
@@ -340,7 +359,7 @@ static Expr *parse_neg(Parser *p)
 static Expr *parse_ident(Parser *p)
 {
     Token t = token(p);
-    CONSUME_EXPECT(p, TOK_ID);
+    MUST_CONSUME(p, TOK_ID);
     return expr_id(t.span, SV(t.value));
 }
 
@@ -357,12 +376,13 @@ static Expr *parse_lambda_or_expr(Parser *p, int prec)
 static Expr *parse_lambda(Parser *p)
 {
     Expr *id = parse_ident(p);
-    if (expr_is_err(id)) return id;
+    if (!expr_ok(id)) return id;
 
-    CONSUME_EXPECT(p, TOK_COLON);
+    MUST_CONSUME(p, TOK_COLON);
+    skip_newlines(p);
 
     Expr *body = parse_lambda_or_expr(p, PREC_PRIMARY);
-    if (expr_is_err(body)) return body;
+    if (!expr_ok(body)) return body;
 
     return expr_lambda(id, body);
 }
@@ -370,13 +390,14 @@ static Expr *parse_lambda(Parser *p)
 // Parse a group expression.
 static Expr *parse_group(Parser *p)
 {
-    CONSUME_EXPECT(p, TOK_LPAREN);
-    Expr *e = parse_lambda_or_expr(p, PREC_PRIMARY);
-    if (expr_is_err(e)) return e;
+    MUST_CONSUME(p, TOK_LPAREN);
+    skip_newlines(p);
 
-    e->span.from--;
-    e->span.to++;
-    CONSUME_EXPECT(p, TOK_RPAREN);
+    Expr *e = parse_lambda_or_expr(p, PREC_PRIMARY);
+    if (!expr_ok(e)) return e;
+
+    skip_newlines(p);
+    SHOULD_CONSUME(p, TOK_RPAREN);
     return e;
 }
 
@@ -406,7 +427,7 @@ static Expr *parse_nud(Parser *p)
 static Expr *parse_apply(Parser *p, Expr *func)
 {
     Expr *arg = parse_nud(p);
-    if (expr_is_err(arg))
+    if (!expr_ok(arg))
     {
         expr_destroy(&func);
         return arg;
@@ -417,19 +438,20 @@ static Expr *parse_apply(Parser *p, Expr *func)
 // Parse a conditional expression.
 static Expr *parse_cond(Parser *p, Expr *if_)
 {
-    CONSUME_EXPECT(p, TOK_QUESTION);
+    MUST_CONSUME(p, TOK_QUESTION);
 
     Expr *then = parse_expr(p, PREC_PRIMARY);
-    if (expr_is_err(then)) 
+    if (!expr_ok(then)) 
     {
         expr_destroy(&if_);
         return then;
     }
 
-    CONSUME_EXPECT(p, TOK_COLON);
+    skip_newlines(p);
+    SHOULD_CONSUME(p, TOK_COLON);
 
     Expr *else_ = parse_expr(p, PREC_PRIMARY);
-    if (expr_is_err(else_)) 
+    if (!expr_ok(else_)) 
     {
         expr_destroy(&if_);
         expr_destroy(&then);
@@ -445,7 +467,7 @@ static Expr *parse_infix_apply(Parser *p, Expr *left)
     p->pos++;
 
     Expr *right = parse_expr(p, PREC_PRIMARY);
-    if (expr_is_err(right))
+    if (!expr_ok(right))
     {
         expr_destroy(&f);
         return right;
@@ -457,6 +479,8 @@ static Expr *parse_infix_apply(Parser *p, Expr *left)
 // Parse a left denotation expression
 static Expr *parse_led(Parser *p, int prec, Expr *left)
 {
+    skip_newlines(p);
+
     if (tkind(p) == TOK_QUESTION)
         return parse_cond(p, left);
 
@@ -480,8 +504,10 @@ static Expr *parse_led(Parser *p, int prec, Expr *left)
     if (is_right_associative(op))
         prec--;
 
+    skip_newlines(p);
+
     Expr *right = parse_lambda_or_expr(p, prec);
-    if (expr_is_err(right))
+    if (!expr_ok(right))
     {
         expr_destroy(&left);
         return right;
@@ -493,8 +519,11 @@ static Expr *parse_led(Parser *p, int prec, Expr *left)
 // Parse an expression.
 static Expr *parse_expr(Parser *p, int prec)
 {
+    if (tkind(p) == TOK_EOF)
+        return expr_incomplete(tspan(p));
+
     Expr *e = parse_nud(p);
-    if (expr_is_err(e)) return e;
+    if (!expr_ok(e)) return e;
 
     for (;;)
     {
@@ -506,10 +535,12 @@ static Expr *parse_expr(Parser *p, int prec)
         }
         else
         {
-            if ((int)tprec(p) <= prec) break;
-            e = parse_led(p, tprec(p), e);
+            Token next = next_real_token(p);
+            int next_prec = token_prec(next);
+            if (next_prec <= prec) break;
+            e = parse_led(p, next_prec, e);
         }
-        if (expr_is_err(e)) return e;
+        if (!expr_ok(e)) return e;
     }
     return e;
 }
@@ -528,22 +559,23 @@ Expr *parse_line(StringView line, unsigned long base, size_t offset)
         Token err = da_last(p.tl);
         DEV_MUST(err.kind == TOK_ERROR);
         out = expr_err(err.span, SV_FMT, SV_ARG(SV(err.value)));
+        goto done;
     }
-    else
+
+    skip_newlines(&p);
+    if (tkind(&p) == TOK_EOF) goto done;
+
+    out = parse_expr(&p, PREC_PRIMARY);
+    if (expr_ok(out))
     {
-        out = parse_expr(&p, PREC_PRIMARY);
+        while (tkind(&p) == TOK_SEMICOLON || tkind(&p) == TOK_NEWLINE)
+            p.pos++;
 
-        if (!expr_is_err(out))
-        {
-            while (tkind(&p) == TOK_SEMICOLON || tkind(&p) == TOK_NEWLINE)
-                p.pos++;
-
-            if (tkind(&p) != TOK_EOF)
-                out = expr_err(tspan(&p), "Trailing characters");
-        }
+        if (tkind(&p) != TOK_EOF)
+            out = expr_err(tspan(&p), "Trailing characters");
     }
 
-    DEV_MUST(out);
+done:
     token_list_free(p.tl);
     return out;
 }

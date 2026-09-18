@@ -7,6 +7,8 @@
     if (expr_is_err(e)) \
         CUT_FATAL("failed to parse "#src": ", \
                 SV_ARG((e)->as.err)); \
+    if (expr_is_incomplete(e)) \
+        CUT_FATAL("failed to parse "#src": incomplete"); \
 } while (0)
 
 #define EXPR_CHECK(got, want) do { \
@@ -20,10 +22,26 @@
     expr_destroy(&__e); \
 } while (0)
 
+#define EXPR_EQ(got, want) do { \
+    if (!expr_equal((got), (want))) { \
+        String __s; str_init(&__s); \
+        expr_render(got, &__s); \
+        CUT_ERROR("expression not equal:\n"SV_FMT, SV_ARG(SV(__s))); \
+        str_free(&__s); \
+    } \
+} while (0)
+
+#define PARSE_INCOMPLETE(src, b) do { \
+    Expr *e = parse(SV(src), (b)); \
+    if (!expr_is_incomplete(e)) \
+        CUT_ERROR("not incomplete on parsing "#src); \
+    expr_destroy(&e); \
+} while (0)
+
 #define PARSE_FAIL(src, b) do { \
     Expr *e = parse(SV(src), (b)); \
     if (!expr_is_err(e)) \
-        CUT_FATAL("did not failed on parsing "#src); \
+        CUT_ERROR("did not failed on parsing "#src); \
     expr_destroy(&e); \
 } while (0)
 
@@ -114,8 +132,29 @@ TEST(invalid_token_is_rejected)
 
 TEST(infix_must_be_complete)
 {
-    PARSE_FAIL("12 + ", 10);
+    PARSE_INCOMPLETE("12 + ", 10);
     PARSE_FAIL("* 34", 10);
+}
+
+TEST(infix_may_be_multi_line)
+{
+    Expr *e = NULL;
+    Expr *want = expr_infix(
+            expr_number_ui((Span){0}, 1, 1),
+            OP_ADD,
+            expr_number_ui((Span){0}, 2, 1));
+
+    PARSE(e, "1 \n + 2", 10);
+    EXPR_EQ(e, want);
+
+    PARSE(e, "1 + \n 2", 10);
+    EXPR_EQ(e, want);
+
+    PARSE(e, "1 \n + \n 2", 10);
+    EXPR_EQ(e, want);
+
+    expr_destroy(&e);
+    expr_destroy(&want);
 }
 
 TEST(digit_list_syntax_must_be_complete)
@@ -144,9 +183,24 @@ TEST(decimal_mixed_format_is_invalid)
 
 TEST(group_must_be_closed)
 {
+    PARSE_INCOMPLETE("1 + (", 10);
+    PARSE_INCOMPLETE("1 + (2", 10);
+}
 
-    PARSE_FAIL("1 + (", 10);
-    PARSE_FAIL("1 + (2", 10);
+TEST(group_may_be_multi_line)
+{
+    Expr *e = NULL;
+
+    PARSE(e, "(1\n)", 10);
+    NUM_EQ(e, 1, 1);
+
+    PARSE(e, "(\n1)", 10);
+    NUM_EQ(e, 1, 1);
+
+    PARSE(e, "(\n1\n)", 10);
+    NUM_EQ(e, 1, 1);
+
+    expr_destroy(&e);
 }
 
 TEST(default_base_is_used_for_untagged_literal)

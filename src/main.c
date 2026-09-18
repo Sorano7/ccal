@@ -247,6 +247,8 @@ void repl_start(VM *vm, RenderCtx *ctx)
     {
         const char *prompt = "ccal> ";
 
+        size_t offset = source_get_offset(&src);
+
         for (;;)
         {
             line = readline(prompt);
@@ -254,21 +256,26 @@ void repl_start(VM *vm, RenderCtx *ctx)
 
             prompt = "..... ";
 
-            StringView part = sv_trim(SV(line));
+            StringView part = SV(line);
             if (part.len == 0) break;
 
             str_append(&in, part);
             free(line);
 
             if (sv_endswith(SV(in), SV(";")))
+            {
                 continue;
-
+            }
             if (sv_endswith(SV(in), SV("\\")))
             {
                 in.len--;
                 continue;
             }
-
+            if (!vm_is_complete(vm, SV(in)))
+            {
+                str_append(&in, "\n");
+                continue;
+            }
             break;
         }
 
@@ -276,6 +283,7 @@ void repl_start(VM *vm, RenderCtx *ctx)
 
         add_history(in.data);
         str_append(&in, "\n");
+        source_append_line(&src, SV(in));
 
         StringView input = SV(in);
         if (sv_startswith(input, SV(":")))
@@ -288,10 +296,7 @@ void repl_start(VM *vm, RenderCtx *ctx)
             continue;
         }
 
-        size_t offset = source_get_offset(&src);
         Value *result = vm_run_next(vm, input, offset);
-        source_append_line(&src, input);
-
         value_render(result, &out, ctx);
         value_release(&result);
 

@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Changed
 - Lambda literal now must be inside parenthesis unless on the right of assignment or is lambda body.
 - Conditional now has shape `<if> ? <then> : <else>`.
+- Some expressions can now span multiple lines
 
 ### Fixed 
 - Lambda no longer suppress undefined symbol error.

@@ -48,6 +48,7 @@ extern const char *op_to_str[];
 typedef enum
 {
     EXPR_ERROR,
+    EXPR_INCOMPLETE,
 
     EXPR_NUMBER,
     EXPR_IDENT,
@@ -105,7 +106,10 @@ typedef struct Expr
 void expr_destroy(Expr **ep);
 
 #define expr_is_err(e) (e->kind == EXPR_ERROR)
+#define expr_is_incomplete(e) (e->kind == EXPR_INCOMPLETE)
+#define expr_ok(e) (e && !expr_is_err(e) && !expr_is_incomplete(e))
 
+Expr *expr_incomplete(Span span);
 Expr *expr_err(Span span, const char *fmt, ...);
 Expr *expr_number(Span span);
 Expr *expr_number_ui(Span span, unsigned long num, unsigned long den);

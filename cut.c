@@ -32,6 +32,7 @@ int main(int argc, char **argv)
     cut_unit_init(&test, "test", CUT_UNIT_EXE);
     cut_unit_sources(&test, "tests/main.c");
     cut_unit_sources(&test, "tests/creal.c");
+    cut_unit_sources(&test, "tests/lexer.c");
     cut_unit_sources(&test, "tests/parser.c");
     cut_unit_sources(&test, "tests/vm.c");
     shared_config(&test);

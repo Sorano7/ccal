@@ -675,16 +675,25 @@ Value *eval_expr(VM *v, const Expr *e)
     return out;
 }
 
-// Collect lines separated by newline or semicolon. Does not trim.
+// Separate into semicolon-separated expressions.
+static void collect_exprs(SVList *exprs, StringView src)
+{
+    while (src.len > 0)
+    {
+        StringView expr = sv_split(&src, ';');
+        da_append(exprs, expr);
+    }
+}
+
 static void collect_lines(SVList *lines, StringView src)
 {
     while (src.len > 0)
     {
         size_t newline = sv_find(src, '\n');
-        size_t scolon = sv_find(src, ';');
-        char delim = newline < scolon ? '\n' : ';';
+        if (newline == SIZE_MAX) newline = src.len;
+        else                     newline++;
 
-        StringView line = sv_split(&src, delim);
+        StringView line = sv_shift(&src, newline);
         da_append(lines, line);
     }
 }
@@ -693,6 +702,8 @@ static Value *vm_run_expr(VM *v, Expr *e)
 {
     if (expr_is_err(e))
         return value_error_from_expr(e);
+    if (expr_is_incomplete(e))
+        return value_errorf(e->span, "Incomplete expression");
 
     Value *out = eval_expr(v, e);
     DEV_MUST(out);
@@ -705,20 +716,31 @@ static Value *vm_run_expr(VM *v, Expr *e)
     return out;
 }
 
+bool vm_is_complete(VM *v, StringView src)
+{
+    Expr *e = parse(src, v->base);
+    if (!e) return true;
+
+    bool complete = !expr_is_incomplete(e);
+    expr_destroy(&e);
+    return complete;
+}
+
 Value *vm_run_next(VM *v, StringView src, size_t offset)
 {
-    SVList lines;
-    da_init(&lines);
-    collect_lines(&lines, src);
+    SVList exprs;
+    da_init(&exprs);
+    collect_exprs(&exprs, src);
 
     Value *out = NULL;
 
-    DA_FOR(&lines, i)
+    DA_FOR(&exprs, i)
     {
-        StringView line = da_at(&lines, i);
+        StringView line = da_at(&exprs, i);
         if (line.len == 0) continue;
 
         Expr *e = parse_line(sv_trim(line), v->base, offset);
+        if (!e) continue;
         out = vm_run_expr(v, e);
         expr_destroy(&e);
 
@@ -726,11 +748,11 @@ Value *vm_run_next(VM *v, StringView src, size_t offset)
 
         offset += line.len;
 
-        if (i < lines.len-1)
+        if (i < exprs.len-1)
             value_release(&out);
     }
 
-    da_free(&lines);
+    da_free(&exprs);
     return out;
 }
 
@@ -740,22 +762,39 @@ Value *vm_run(VM *v, StringView input, Source *src)
     da_init(&lines);
     collect_lines(&lines, input);
 
+    String in;
+    str_init(&in);
+
     Value *out = NULL;
+
     DA_FOR(&lines, i)
     {
         StringView line = da_at(&lines, i);
-        if (line.len == 0) continue;
+        if (line.len == 0 || sv_equal(line, "\n"))
+            continue;
+        str_append(&in, line);
 
-        size_t offset = src ? source_get_offset(src) : 0;
-        out = vm_run_next(v, line, offset);
+        size_t offset = 0;
+
+        while (!vm_is_complete(v, SV(in)))
+        {
+            if (src) source_append_line(src, line);
+            line = da_at(&lines, ++i);
+            str_append(&in, line);
+        }
+
+        out = vm_run_next(v, SV(in), offset);
         if (src) source_append_line(src, line);
 
         if (value_is_err(out)) break;
 
         if (i < lines.len-1)
             value_release(&out);
+
+        str_reset(&in);
     }
 
+    str_free(&in);
     da_free(&lines);
     return out;
 }

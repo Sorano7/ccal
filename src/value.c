@@ -361,34 +361,72 @@ static void value_render_exact(Value *v, String *sb, RenderCtx *ctx)
     appendc(AFMT_RESET);
 }
 
+static void render_error_carets(Span span, String *sb, RenderCtx *ctx)
+{
+
+    for (size_t i = 0; i < span.from; i++)
+        str_append(sb, " ");
+
+    appendc(AFMT_BOLD ACOLOR_MAGENTA);
+
+    size_t len = span.to - span.from;
+    for (size_t i = 0; i < len; i++)
+        str_appendf(sb, "^");
+
+    str_appendf(sb, " ");
+    appendc(AFMT_RESET);
+}
+
 // Render an error value.
 static void value_render_error(Value *v, String *sb, RenderCtx *ctx)
 {
+    String src;
+    str_init(&src);
+
     Span err_span = v->span;
     bool show_src = ctx->src 
-        && source_get_line(ctx->src, v->span, &err_span, sb)
-        && sb->len > 0;
+        && source_get_line(ctx->src, v->span, &err_span, &src)
+        && src.len > 0;
 
+    bool msg_shown = false;
     if (show_src)
     {
-        if (!sv_endswith(SV(sb), SV("\n")))
-            str_append(sb, "\n");
+        StringView expr = SV(src);
+        size_t start = 0;
+        while (expr.len > 0)
+        {
+            StringView line = sv_split(&expr, '\n');
+            str_appendf(sb, SV_FMT"\n", SV_ARG(line));
 
-        for (size_t i = 0; i < err_span.from; i++)
-            str_append(sb, " ");
+            size_t end = start + line.len + 1;
+            bool overlap = err_span.from <= start || end >= err_span.to;
+            if (!msg_shown && overlap)
+            {
+                Span carets = {
+                    err_span.from > start ? err_span.from-start : 0,
+                    err_span.to < end ? err_span.to-start : line.len,
+                };
+                render_error_carets(carets, sb, ctx);
+
+                if (end >= err_span.to)
+                {
+                    appendc(AFMT_BOLD ACOLOR_MAGENTA);
+                    str_append(sb, SV(v->as.error));
+                    appendc(AFMT_RESET);
+                    msg_shown = true;
+                }
+                str_append(sb, "\n");
+            }
+            start += line.len + 1;
+        }
     }
 
-    appendc(AFMT_BOLD ACOLOR_MAGENTA);
-    if (show_src)
+    if (!msg_shown)
     {
-        size_t len = err_span.to - err_span.from;
-        for (size_t i = 0; i < len; i++)
-            str_appendf(sb, "^");
-        str_appendf(sb, " ");
+        appendc(AFMT_BOLD ACOLOR_MAGENTA);
+        str_append(sb, SV(v->as.error));
+        appendc(AFMT_RESET);
     }
-
-    str_append(sb, SV(v->as.error));
-    appendc(AFMT_RESET);
 }
 
 // Render a builtin value.

@@ -26,6 +26,7 @@ int main(int argc, char **argv)
     cut_unit_init(&app, "ccal", CUT_UNIT_EXE);
     cut_unit_sources(&app, "src/main.c");
     cut_unit_libs(&app, "readline", "ncursesw", "tinfow");
+    cut_unit_sources(&app, "src/repl.c");
     shared_config(&app);
 
     CutUnit test;

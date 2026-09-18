@@ -24,9 +24,11 @@ Options include:
 Similar commands are available in REPL, prefixed with `:`.
 
 
-## Syntax
+## Basic Syntax
 
-Each line is one or more expressions separated with `;`. Use `--` for comments, which ignores until a newline or another `--`.
+Expression-only. Certain expressions may span multiple lines, and multiple expressions can be on the same line separated with `;`. 
+
+Use `--` for comments, which ignores until a newline or another `--`.
 
 There are three types: `exact`, `real`, and `lambda`.
 
@@ -110,6 +112,14 @@ Conditional has the shape `<if> ? <then> : <else>`, which is evaluated lazily. N
 'fac = 'n: ('n == 0) ? 1 : 'n * 'fac ('n - 1)
 
 'foldr = 'f: 'z: 'l: 'l 'z ('x: 'xs: 'f 'x $ 'foldr 'f 'z 'xs)
+```
+
+Guards can be used as syntactic sugar of conditionals, for lambda expressions. The else branch `'_` is required.
+
+```
+'fac = 'n:
+       | 'n == 0 -> 1
+       | '_      -> 'n * 'fac ('n - 1)
 ```
 
 ## Real Numbers

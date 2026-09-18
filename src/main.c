@@ -73,6 +73,14 @@ int clear_screen(int count, int key)
     return 0;
 }
 
+int insert_spaces(int count, int key)
+{
+    (void)count, (void)key;
+    for (int i = 0; i < 4; i++)
+        rl_insert(1, ' ');
+    return 0;
+}
+
 #define printc(c, s, ...) do { \
     if (ctx->use_color) printf(AFMT_RESET"%s", (c)); \
     printf(s __VA_OPT__(,) __VA_ARGS__); \
@@ -270,7 +278,7 @@ static bool read_logical_line(VM *vm, String *sb)
 void repl_start(VM *vm, RenderCtx *ctx)
 {
     rl_bind_key('\014', clear_screen);
-    rl_bind_key('\t', rl_insert);
+    rl_bind_key('\t', insert_spaces);
 
     Source src;
     source_init(&src);

@@ -352,9 +352,9 @@ void repl_start(VM *vm, RenderCtx *ctx)
     rl_bind_key('\t', tab_handler);
 
     rl_attempted_completion_function = repl_completion;
-    rl_completer_word_break_characters = " :'";
+    rl_completer_word_break_characters = " :'`";
     rl_completer_quote_characters = "";
-    rl_basic_quote_characters = "";
+    rl_basic_quote_characters = "`";
 
     Source src;
     source_init(&src);

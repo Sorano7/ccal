@@ -451,13 +451,15 @@ void cut_test_run_opt(TestRunOpt opt);
 typedef enum
 {
     CUT_UNIT_EXE,
-    CUT_UNIT_LIB,
+    CUT_UNIT_LIB_SHARED,
+    CUT_UNIT_LIB_STATIC,
 } CutUnitKind;
 
 // A build unit.
 typedef struct
 {
     StringView name;
+    StringView libname;
     CutUnitKind kind;
 
     SVList sources;
@@ -481,11 +483,16 @@ void _cut_make_sv_list(SVList *sl, ...);
 #define cut_unit_libs(unit, ...)     _cut_make_sv_list(&(unit)->libs,     __VA_OPT__(__VA_ARGS__,) NULL);
 #define cut_unit_lib_dirs(unit, ...) _cut_make_sv_list(&(unit)->lib_dirs, __VA_OPT__(__VA_ARGS__,) NULL);
 
+#define cut_unit_lib_name(unit, name) do { \
+    (unit)->libname = SV(name); \
+} while (0)
+
 // Options for builder
 typedef struct
 {
     StringView cc;
     StringView build_dir;
+    StringView lib_dir;
     StringView script_name;
 } CutBuilderOpt;
 
@@ -493,6 +500,7 @@ typedef struct
 {
     StringView cc;
     StringView build_dir;
+    StringView lib_dir;
     StringView script_name;
     StringView file;
     CutUnit **units;
@@ -501,11 +509,13 @@ typedef struct
 
 #define CC_DEFAULT        SV("cc")
 #define BUILD_DIR_DEFAULT SV("build")
+#define LIB_DIR_DEFAULT   SV("lib")
 
 // Initialize the build with options.
 void cut_build_init_opt(StringView file, CutBuilderOpt opt);
 #define cut_build_init(...) cut_build_init_opt(SV(__FILE__), \
     (CutBuilderOpt){.cc=CC_DEFAULT, .build_dir=BUILD_DIR_DEFAULT, \
+    .lib_dir=LIB_DIR_DEFAULT, \
     .script_name=(StringView){__FILE__, sizeof(__FILE__)-3}, \
     __VA_ARGS__})
 
@@ -1029,33 +1039,6 @@ static void append_exe_name(String *sb, StringView base)
 #endif
 }
 
-// Generate the build command for a unit.
-static void generate_build_command(CutUnit *unit, String *sb)
-{
-    str_appendf(sb, SV_FMT" ", SV_ARG(cut_builder.cc));
-
-    command_format(&unit->sources, sb, SV(""));
-    command_format(&unit->includes, sb, SV("-I"));
-    command_format(&unit->flags, sb, SV(""));
-    command_format(&unit->defines, sb, SV("-D"));
-    command_format(&unit->lib_dirs, sb, SV("-L"));
-    command_format(&unit->libs, sb, SV("-l"));
-
-    str_appendf(sb, "-o "SV_FMT"/", SV_ARG(cut_builder.build_dir));
-    str_appendf(sb, SV_FMT" ", SV_ARG(unit->name));
-}
-
-// Generate the command to run an executable. Contains a trailing whitespace.
-static void generate_run_command(StringView name, StringView parent, String *sb)
-{
-    str_appendf(sb, "."PATH_SEP);
-    if (parent.len > 0)
-        str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.build_dir));
-
-    append_exe_name(sb, name);
-    str_appendf(sb, " ");
-}
-
 // Run a external command.
 static void exec_command(StringView cmd)
 {
@@ -1065,13 +1048,6 @@ static void exec_command(StringView cmd)
 
     if (system(cmd_buf) != 0)
         DEV_FATAL("Failed to execute command.");
-}
-
-// Get the backup name for the script executable.
-static void old_script_exe_name(String *sb)
-{
-    append_exe_name(sb, cut_builder.script_name);
-    str_appendf(sb, ".old");
 }
 
 // Remove a path.
@@ -1088,6 +1064,21 @@ static void remove_path(StringView path)
     str_appendf(&cmd, "\""SV_FMT"\"", SV_ARG(path));
     exec_command(SV(cmd));
     str_free(&cmd);
+}
+
+static StringView get_base_name(StringView file)
+{
+    StringView base = sv_split(&file, '.');
+
+    size_t next_fwd = sv_find(base, '/');
+    char delim = next_fwd == SIZE_MAX ? '\\' : '/';
+
+    for (;;)
+    {
+        StringView next = sv_split(&base, delim);
+        if (base.len == 0)
+            return next;
+    }
 }
 
 /************************************************
@@ -1374,6 +1365,105 @@ static bool should_rebuild(StringView file, StringView exe_name)
     return difftime(mtime_file, mtime_exe) > 0;
 }
 
+// Get the backup name for the script executable.
+static void old_script_exe_name(String *sb)
+{
+    append_exe_name(sb, cut_builder.script_name);
+    str_appendf(sb, ".old");
+}
+
+static void cmd_add_objs(CutUnit *unit, String *sb)
+{
+    DA_FOR(&unit->sources, i)
+    {
+        StringView src = da_at(&unit->sources, i);
+        StringView base = get_base_name(src);
+        str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.build_dir));
+        str_appendf(sb, SV_FMT".o ", SV_ARG(base));
+    }
+}
+
+static void cmd_add_cc(String *sb)
+{
+    str_appendf(sb, SV_FMT" ", SV_ARG(cut_builder.cc));
+}
+
+static void cmd_add_srcs(CutUnit *unit, String *sb)
+{
+    command_format(&unit->sources, sb, SV(""));
+}
+
+static void cmd_add_cflags(CutUnit *unit, String *sb)
+{
+    command_format(&unit->includes, sb, SV("-I"));
+    command_format(&unit->flags, sb, SV(""));
+    command_format(&unit->defines, sb, SV("-D"));
+}
+
+static void cmd_add_links(CutUnit *unit, String *sb)
+{
+    command_format(&unit->lib_dirs, sb, SV("-L"));
+    command_format(&unit->libs, sb, SV("-l"));
+}
+
+// Generate the build command for a unit.
+static void cmd_build_exe(CutUnit *unit, String *sb)
+{
+    cmd_add_cc(sb);
+    cmd_add_srcs(unit, sb);
+    cmd_add_cflags(unit, sb);
+    cmd_add_links(unit, sb);
+    str_appendf(sb, "-o "SV_FMT PATH_SEP SV_FMT" ", 
+            SV_ARG(cut_builder.build_dir), SV_ARG(unit->name));
+}
+
+static void cmd_build_obj(CutUnit *unit, StringView src, bool pic, String *sb)
+{
+    cmd_add_cc(sb);
+    str_append(sb, "-c ");
+    if (pic) str_append(sb, "-fPIC ");
+
+    str_appendf(sb, SV_FMT" ", SV_ARG(src));
+
+    cmd_add_cflags(unit, sb);
+
+    StringView base = get_base_name(src);
+    str_appendf(sb, "-o "SV_FMT PATH_SEP SV_FMT".o ", 
+            SV_ARG(cut_builder.build_dir), SV_ARG(base));
+
+    exec_command(SV(sb));
+}
+
+static void cmd_build_shared(CutUnit *unit, String *sb)
+{
+    cmd_add_cc(sb);
+    str_append(sb, "-shared ");
+    cmd_add_objs(unit, sb);
+    StringView libname = unit->libname.len == 0 ? unit->name : unit->libname;
+    str_appendf(sb, "-o "SV_FMT PATH_SEP, SV_ARG(cut_builder.lib_dir));
+    str_appendf(sb, "lib"SV_FMT".so ", SV_ARG(libname));
+}
+
+static void cmd_build_static(CutUnit *unit, String *sb)
+{
+    str_append(sb, "ar rcs ");
+    str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.lib_dir));
+    StringView libname = unit->libname.len == 0 ? unit->name : unit->libname;
+    str_appendf(sb, "lib"SV_FMT".a ", SV_ARG(libname));
+    cmd_add_objs(unit, sb);
+}
+
+// Generate the command to run an executable. Contains a trailing whitespace.
+static void cmd_run_exe(StringView name, StringView parent, String *sb)
+{
+    str_appendf(sb, "."PATH_SEP);
+    if (parent.len > 0)
+        str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.build_dir));
+
+    append_exe_name(sb, name);
+    str_appendf(sb, " ");
+}
+
 // Rebuild the build script.
 static void cut_rebuild(size_t argc, StringView *argv)
 {
@@ -1407,7 +1497,7 @@ static void cut_rebuild(size_t argc, StringView *argv)
     exec_command(SV(sb));
 
     str_reset(&sb);
-    generate_run_command(cut_builder.script_name, SV(""), &sb);
+    cmd_run_exe(cut_builder.script_name, SV(""), &sb);
     for (size_t i = 1; i < argc; i++)
         str_appendf(&sb, SV_FMT" ", SV_ARG(argv[i]));
 
@@ -1416,18 +1506,12 @@ static void cut_rebuild(size_t argc, StringView *argv)
     exit(0);
 }
 
-// Initialize the build with options.
-void cut_build_init_opt(StringView file, CutBuilderOpt opt)
+void cut_create_dir(StringView dir)
 {
-    cut_builder.cc = opt.cc;
-    cut_builder.build_dir = opt.build_dir;
-    cut_builder.script_name = opt.script_name;
-    cut_builder.file = file;
-
-    switch (mkdir_if_not_exist(opt.build_dir))
+    switch (mkdir_if_not_exist(dir))
     {
         case MKDIR_CREATED:
-            DEV_INFO("Created directory: "SV_FMT, SV_ARG(opt.build_dir));
+            DEV_INFO("Created directory: "SV_FMT, SV_ARG(dir));
             break;
 
         case MKDIR_EXISTS:
@@ -1436,6 +1520,19 @@ void cut_build_init_opt(StringView file, CutBuilderOpt opt)
         case MKDIR_FAILED:
             DEV_FATAL("Unknown error occured during directory creation.");
     }
+}
+
+// Initialize the build with options.
+void cut_build_init_opt(StringView file, CutBuilderOpt opt)
+{
+    cut_builder.cc = opt.cc;
+    cut_builder.build_dir = opt.build_dir;
+    cut_builder.lib_dir = opt.lib_dir;
+    cut_builder.script_name = opt.script_name;
+    cut_builder.file = file;
+
+    cut_create_dir(opt.build_dir);
+    cut_create_dir(opt.lib_dir);
 }
 
 // Define all units for the build.
@@ -1479,12 +1576,77 @@ static CutUnit *cut_build_find_unit(StringView name)
     return NULL;
 }
 
-// Run build.
-int cut_build_run(int argc, char **argv)
+static void cut_build_exe(CutUnit *exe, bool run, StringView *args, int count)
 {
     String cmd;
     str_init(&cmd);
 
+    cmd_build_exe(exe, &cmd);
+    exec_command(SV(cmd));
+
+    if (run)
+    {
+        str_reset(&cmd);
+        cmd_run_exe(exe->name, cut_builder.build_dir, &cmd);
+        for (int i = 0; i < count; i++)
+            str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(args[i]));
+
+        exec_command(SV(cmd));
+    }
+
+    str_free(&cmd);
+}
+
+static void cut_build_objs(CutUnit *unit)
+{
+    String cmd;
+    str_init(&cmd);
+
+    bool shared = unit->kind == CUT_UNIT_LIB_SHARED;
+    DA_FOR(&unit->sources, i)
+    {
+        StringView src = da_at(&unit->sources, i);
+        cmd_build_obj(unit, src, shared, &cmd);
+        exec_command(SV(cmd));
+        str_reset(&cmd);
+    }
+    str_free(&cmd);
+}
+
+static void cut_build_lib(CutUnit *lib)
+{
+    String cmd;
+    str_init(&cmd);
+
+    cut_build_objs(lib);
+
+    if (lib->kind == CUT_UNIT_LIB_SHARED)
+        cmd_build_shared(lib, &cmd);
+    else
+        cmd_build_static(lib, &cmd);
+    exec_command(SV(cmd));
+
+    str_free(&cmd);
+}
+
+static void cut_build_clean(void)
+{
+    String cmd;
+    str_init(&cmd);
+
+    str_appendf(&cmd, SV_FMT PATH_SEP "*", SV_ARG(cut_builder.build_dir));
+    remove_path(SV(cmd));
+
+    str_reset(&cmd);
+    old_script_exe_name(&cmd);
+    remove_path(SV(cmd));
+
+    str_free(&cmd);
+}
+
+// Run build.
+int cut_build_run(int argc, char **argv)
+{
     StringView args[argc];
     for (int i = 0; i < argc; i++)
         args[i] = SV(argv[i]);
@@ -1492,56 +1654,54 @@ int cut_build_run(int argc, char **argv)
     if (should_rebuild(cut_builder.file, cut_builder.script_name))
         cut_rebuild(argc, args);
 
-    if (argc == 2 && sv_equal(args[1], "clean"))
+    StringView subcmd = args[1];
+
+    if (argc == 2 && sv_equal(subcmd, "clean"))
     {
-        str_appendf(&cmd, SV_FMT PATH_SEP "*", SV_ARG(cut_builder.build_dir));
-        remove_path(SV(cmd));
-
-        str_reset(&cmd);
-        old_script_exe_name(&cmd);
-        remove_path(SV(cmd));
-        return 0;
+        cut_build_clean();
     }
-
-    if (argc >= 3 && sv_equal(args[1], "rebuild"))
+    else if (argc >= 3 && sv_equal(subcmd, "rebuild"))
     {
         cut_rebuild(argc-1, args+1);
-        return 0;
     }
-
-    if (argc >= 3)
+    else if (argc >= 3)
     {
-        if (sv_equal(args[1], "build") || sv_equal(args[1], "run"))
+        bool build = sv_equal(subcmd, "build");
+        bool run = sv_equal(subcmd, "run");
+
+        if (build || run)
         {
             CutUnit *unit = NULL;
             unit = cut_build_find_unit(args[2]);
             if (!unit) 
                 DEV_FATAL("Unit '"SV_FMT"' does not exist.", SV_ARG(args[2]));
 
-            generate_build_command(unit, &cmd);
-            exec_command(SV(cmd));
-
-            if (sv_equal(args[1], "run"))
+            switch (unit->kind)
             {
-                str_reset(&cmd);
-                generate_run_command(unit->name, cut_builder.build_dir, &cmd);
-                for (int i = 3; i < argc; i++)
-                    str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(args[i]));
+                case CUT_UNIT_EXE:
+                    cut_build_exe(unit, run, args+3, argc-3);
+                    break;
 
-                exec_command(SV(cmd));
+                case CUT_UNIT_LIB_STATIC:
+                case CUT_UNIT_LIB_SHARED:
+                    cut_build_lib(unit);
+                    break;
             }
-            return 0;
         }
     }
+    else
+    {
+        printf("Usage: \n"
+                "    <cut> help             show this help\n"
+                "    <cut> build <name>     build the unit\n"
+                "    <cut> run <name>       build and run the unit\n"
+                "    <cut> clean            clean artifacts\n"
+                "    <cut> rebuild <cmd>    rebuild script executable\n");
 
-    printf("Usage: \n"
-           "    <cut> help             show this help\n"
-           "    <cut> build <name>     build the unit\n"
-           "    <cut> run <name>       build and run the unit\n"
-           "    <cut> clean            clean artifacts\n"
-           "    <cut> rebuild <cmd>    rebuild script executable\n");
+        return 1;
+    }
 
-    return 1;
+    return 0;
 }
 
 

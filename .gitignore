@@ -1,6 +1,7 @@
 .clangd
 
 build/
+lib/
 
 cut
 cut.old

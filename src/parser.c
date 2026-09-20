@@ -600,6 +600,12 @@ static Expr *parse_expr(Parser *p, int prec)
     return e;
 }
 
+static bool is_empty(Parser *p)
+{
+    skip_newlines(p);
+    return tkind(p) == TOK_EOF;
+}
+
 // Parse a single line of one expression with an offset into the source.
 Expr *parse_line(StringView line, unsigned long base, size_t offset)
 {
@@ -617,8 +623,7 @@ Expr *parse_line(StringView line, unsigned long base, size_t offset)
         goto done;
     }
 
-    skip_newlines(&p);
-    if (tkind(&p) == TOK_EOF) goto done;
+    if (is_empty(&p)) goto done;
 
     out = parse_expr(&p, PREC_PRIMARY);
     if (expr_ok(out))

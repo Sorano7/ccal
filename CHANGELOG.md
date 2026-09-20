@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 - Comments with `--`. Subtraction operator now must be space-separated from negation.
 - Multi-line support for REPL.
 - REPL command to clear the session.
+- REPL tab-completion for commands and symbols.
 - CLI subcommand to run a script.
 - Modulo operator and builtin lambda.
 - Guard expression with `|`.

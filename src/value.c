@@ -183,6 +183,7 @@ bool value_to_bool(const Value *v)
 }
 
 const char *builtin_to_str[] = {
+    [BUILTIN_NONE]  = "",
     [BUILTIN_HOLE]  = "_",
     [BUILTIN_TRUE]  = "true",
     [BUILTIN_FALSE] = "false",
@@ -320,6 +321,26 @@ Value *scope_get_symbol(Scope *scope, StringView id)
         scope = scope->parent;
     }
     return NULL;
+}
+
+void matching_symbol_list(const Scope *scope, StringView name, SVList *sl)
+{
+    if (scope)
+    {
+        DA_FOR(scope, i)
+        {
+            Symbol s = da_at(scope, i);
+            if (sv_startswith(SV(s.id), name))
+                da_append(sl, SV(s.id));
+        }
+    }
+
+    for (int i = 0; i < _BUILTIN_COUNT; i++)
+    {
+        StringView b = SV(builtin_to_str[i]);
+        if (sv_startswith(b, name))
+            da_append(sl, b);
+    }
 }
 
 #define appendc(c) do { \

@@ -31,23 +31,6 @@ const char repl_help[] = "Commands:\n"
                          FORMAT_LIST
 ;
 
-int clear_screen(int count, int key)
-{
-    (void)count; (void)key;
-    printf("\e[H\e[2J");
-    fflush(stdout);
-    rl_forced_update_display();
-    return 0;
-}
-
-int insert_spaces(int count, int key)
-{
-    (void)count, (void)key;
-    for (int i = 0; i < 4; i++)
-        rl_insert(1, ' ');
-    return 0;
-}
-
 #define printc(c, s, ...) do { \
     if (ctx->use_color) printf(AFMT_RESET"%s", (c)); \
     printf(s __VA_OPT__(,) __VA_ARGS__); \
@@ -139,7 +122,7 @@ static void repl_handle_set_command(VM *vm, RenderCtx *ctx, StringView src)
             printc(AFMT_DIM, "Display format: ");
             printc(ACOLOR_CYAN, "fixed\n");
         }
-        else if (sv_equal(src, "sci"))
+        else if (sv_equal(src, "sci") || sv_equal(src, "scientific"))
         {
             ctx->fmt = FMT_SCI;
             printc(AFMT_DIM, "Display format: ");
@@ -204,6 +187,111 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
     return should_continue;
 }
 
+static const Scope *env = NULL;
+
+// Generate a symbol completion from user-defined and builtin pools.
+char *symbol_generator(const char *text, int state)
+{
+    static size_t idx;
+    static SVList list = {0};
+
+    if (!state)
+    {
+        idx = 0;
+
+        if (!list.data)
+        {
+            da_init(&list);
+        }
+        else
+        {
+            da_reset(&list);
+        }
+        matching_symbol_list(env, SV(text), &list);
+    }
+
+    while (idx < list.len)
+        return sv_alloc_cstr(list.data[idx++]);
+
+    return NULL;
+}
+
+static const char *commands[] = {
+    "help", "quit", "env", "clear", "set", NULL
+};
+
+static const char *set_options[] = {
+    "obase", "ibase", "precision", "truncate", "format", "rational", NULL
+};
+
+static const char *fmt_options[] = {
+    "auto", "fixed", "scientific", NULL
+};
+
+// Generate a match from a fixed, null-terminated array.
+char *fixed_match_generator(const char **list, const char *text, int state)
+{
+    static size_t idx;
+    const char *cand;
+
+    if (!state) idx = 0;
+    while ((cand = list[idx++]))
+    {
+        if (sv_startswith(SV(cand), SV(text)))
+            return strdup(cand);
+    }
+    return NULL;
+}
+
+char *command_generator(const char *text, int state)
+{
+    return fixed_match_generator(commands, text, state);
+}
+
+char *set_option_generator(const char *text, int state)
+{
+    return fixed_match_generator(set_options, text, state);
+}
+
+char *fmt_option_generator(const char *text, int state)
+{
+    return fixed_match_generator(fmt_options, text, state);
+}
+
+// Completion function for REPL.
+char **repl_completion(const char *text, int start, int end)
+{
+    (void)start, (void)end;
+
+    rl_attempted_completion_over = 1;
+    rl_completion_suppress_quote = 1;
+    rl_completion_append_character = '\0';
+    rl_completion_quote_character = '\0';
+
+    StringView line_buf = SV(rl_line_buffer);
+    if (sv_startswith(line_buf, SV(":set fmt "))
+            || sv_startswith(line_buf, SV(":set format ")))
+        return rl_completion_matches(text, fmt_option_generator);
+
+    if (sv_startswith(line_buf, SV(":set ")))
+        return rl_completion_matches(text, set_option_generator);
+
+    if (sv_startswith(line_buf, SV(":")))
+        return rl_completion_matches(text, command_generator);
+
+    return rl_completion_matches(text, symbol_generator);
+}
+
+// Clear terminal.
+int clear_screen(int count, int key)
+{
+    (void)count; (void)key;
+    printf("\e[H\e[2J");
+    fflush(stdout);
+    rl_forced_update_display();
+    return 0;
+}
+
 static bool read_logical_line(VM *vm, String *sb)
 {
     const char *prompt = "ccal> ";
@@ -241,15 +329,37 @@ static bool read_logical_line(VM *vm, String *sb)
     return true;
 }
 
+int tab_handler(int count, int key)
+{
+    (void)count, (void)key;
+
+    StringView line = sv_trim(SV(rl_line_buffer));
+    if (line.len == 0)
+    {
+        rl_insert_text("    ");
+        return 0;
+    }
+    if (rl_last_func == tab_handler)
+        return rl_complete_internal('?');
+
+    return rl_complete_internal(TAB);
+}
+
 // Start interactive REPL.
 void repl_start(VM *vm, RenderCtx *ctx)
 {
     rl_bind_key('\014', clear_screen);
-    rl_bind_key('\t', insert_spaces);
+    rl_bind_key('\t', tab_handler);
+
+    rl_attempted_completion_function = repl_completion;
+    rl_completer_word_break_characters = " :'";
+    rl_completer_quote_characters = "";
+    rl_basic_quote_characters = "";
 
     Source src;
     source_init(&src);
     ctx->src = &src;
+    env = vm->scope;
 
     String sb;
     str_reserve(&sb, 256);
@@ -317,6 +427,7 @@ bool run_eval(VM *vm, FILE *fdout, StringView input, RenderCtx *ctx)
     return ok;
 }
 
+// Run a script file.
 bool run_script(VM *vm, StringView path, RenderCtx *ctx)
 {
     String buf;

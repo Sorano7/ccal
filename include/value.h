@@ -38,6 +38,7 @@ typedef enum
     BUILTIN_EXP,
     BUILTIN_LOG,
     BUILTIN_LN,
+    _BUILTIN_COUNT,
 } BuiltinKind;
 
 extern const char *vk_to_str[];
@@ -132,6 +133,8 @@ Scope *scope_retain(Scope *s);
 
 void scope_set_symbol(Scope *scope, StringView id, Value *value);
 Value *scope_get_symbol(Scope *scope, StringView id);
+
+void matching_symbol_list(const Scope *scope, StringView name, SVList *sl);
 
 typedef struct
 {

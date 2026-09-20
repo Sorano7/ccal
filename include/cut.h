@@ -135,6 +135,8 @@ StringView _sv_from_strp(const void *pp);
     memcpy(&id, (sv).data, (sv).len); \
     id[(sv).len] = '\0';
 
+char *sv_alloc_cstr(StringView s);
+
 // Returns if a and b are equal.
 bool _sv_equal(StringView a, StringView b);
 
@@ -684,6 +686,14 @@ StringView _sv_from_strp(const void *pp)
     return (StringView){(*s)->data, (*s)->len};
 }
 
+char *sv_alloc_cstr(StringView s)
+{
+    char *str = malloc(s.len+1);
+    memcpy(str, s.data, s.len);
+    str[s.len] = '\0';
+    return str;
+}
+
 // Returns if a and b are equal.
 bool _sv_equal(StringView a, StringView b)
 {
@@ -797,26 +807,21 @@ StringView sv_split(StringView *s, char delim)
 // Trim whitespaces from the string view.
 StringView sv_trim(StringView s)
 {
-    for (;;)
+    while (s.len > 0)
     {
-        if (isspace(*s.data))
-        {
-            s.data++;
-            s.len--;
-            continue;
-        }
-        break;
+        if (!isspace(*s.data))
+            break;
+        s.data++;
+        s.len--;
     }
 
-    for (;;)
+    while (s.len > 0)
     {
-        if (isspace(s.data[s.len-1]))
-        {
-            s.len--;
-            continue;
-        }
-        break;
+        if (!isspace(s.data[s.len-1]))
+            break;
+        s.len--;
     }
+
     return s;
 }
 

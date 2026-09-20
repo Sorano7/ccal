@@ -732,31 +732,36 @@ Value *vm_run_next(VM *v, StringView src, size_t offset)
     da_init(&exprs);
     collect_exprs(&exprs, src);
 
-    Value *out = NULL;
+    int vals_count = 0;
+    Value *vals[exprs.len];
 
     DA_FOR(&exprs, i)
     {
         StringView line = da_at(&exprs, i);
-        if (line.len == 0) continue;
+        if (sv_trim(line).len == 0)
+            continue;
 
         Expr *e = parse_line(sv_trim(line), v->base, offset);
-        if (!e)
-        {
-            out = value_void((Span){0});
-            continue;
-        }
-        out = vm_run_expr(v, e);
+        if (!e) continue;
+
+        Value *next = vm_run_expr(v, e);
         expr_destroy(&e);
 
-        if (value_is_err(out)) break;
+        vals[vals_count++] = next;
+        if (value_is_err(next)) break;
 
         offset += line.len;
-
-        if (i < exprs.len-1)
-            value_release(&out);
     }
 
     da_free(&exprs);
+
+    if (vals_count == 0)
+        return value_void((Span){0, src.len});
+
+    for (int i = 0; i < vals_count-1; i++)
+        value_release(&vals[i]);
+
+    Value *out = vals[vals_count-1];
     DEV_MUST(out);
     return out;
 }
@@ -770,14 +775,15 @@ Value *vm_run(VM *v, StringView input, Source *src)
     String in;
     str_init(&in);
 
-    Value *out = NULL;
+    int vals_count = 0;
+    Value *vals[lines.len];
 
     DA_FOR(&lines, i)
     {
         size_t offset = src ? source_get_offset(src) : 0;
 
         StringView line = da_at(&lines, i);
-        if (line.len == 0 || sv_equal(line, "\n"))
+        if (sv_trim(line).len == 0)
             continue;
 
         str_append(&in, line);
@@ -789,20 +795,22 @@ Value *vm_run(VM *v, StringView input, Source *src)
         if (src) source_append_line(src, SV(in));
 
         Value *next = vm_run_next(v, SV(in), offset);
-        if (!next) continue;
-        if (next->kind != VAL_VOID)
-            out = next;
-
-        if (value_is_err(out)) break;
-
-        if (i < lines.len-1)
-            value_release(&out);
+        vals[vals_count++] = next;
+        if (value_is_err(next)) break;
 
         str_reset(&in);
     }
 
     str_free(&in);
     da_free(&lines);
-    if (!out) out = value_void((Span){0});
+
+    if (vals_count == 0)
+        return value_void((Span){0, input.len});
+
+    for (int i = 0; i < vals_count-1; i++)
+        value_release(&vals[i]);
+
+    Value *out = vals[vals_count-1];
+    DEV_MUST(out);
     return out;
 }

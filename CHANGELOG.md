@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-20
+
 ### Added
 - Comments with `--`. Subtraction operator now must be space-separated from negation.
 - Multi-line support for REPL.
@@ -23,7 +25,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Fixed 
 - Lambda no longer suppress undefined symbol error.
 - Self-referential lambdas no longer leaks memory.
-- Diagnostics now display against the correct source line.
+- Diagnostics now display against the correct source line and multi-line aware.
 
 
 ## [1.1.0] - 2026-09-15

@@ -625,6 +625,7 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 #define isatty     _isatty
 #define fileno     _fileno
 #define stat       _stat
+#define fstat      _fstat
 
 #define makedir(x) _mkdir(x)
 

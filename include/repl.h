@@ -3,31 +3,31 @@
 
 #include "vm.h"
 
-#define FORMAT    "set the display format for numeric values"
-#define AUTO      "fixed-point by default, scientific for large exponent"
-#define FIXED     "force fixed-point notation"
-#define SCI       "force scientific notation"
+#define DESC_FORMAT    "set the display format for numeric values"
+#define DESC_AUTO      "fixed-point by default, scientific for large exponent"
+#define DESC_FIXED     "force fixed-point notation"
+#define DESC_SCI       "force scientific notation"
 
-#define RATIONAL  "display rational form alongside output for exact values"
-#define OBASE     "set the output base"
-#define IBASE     "set the default input base"
-#define PRECISION "set the precision for real value"
-#define TRUNCATE  "set the max decimal places to truncate at"
+#define DESC_RATIONAL  "display rational form alongside output for exact values"
+#define DESC_OBASE     "set the output base"
+#define DESC_IBASE     "set the default input base"
+#define DESC_PRECISION "set the precision for real value"
+#define DESC_TRUNCATE  "set the max decimal places to truncate at"
 
 #define FORMAT_LIST \
                     "Display Formats:\n" \
-                    "    auto                        "AUTO     "\n" \
-                    "    fixed                       "FIXED    "\n" \
-                    "    sci | scientific            "SCI      "\n"
+                    "    auto                        "DESC_AUTO     "\n" \
+                    "    fixed                       "DESC_FIXED    "\n" \
+                    "    sci | scientific            "DESC_SCI      "\n"
 
 #define OPTIONS_REPL \
                     "Options:\n" \
-                    "    ob  | obase     <n>         "OBASE    "\n" \
-                    "    ib  | ibase     <n>         "IBASE    "\n" \
-                    "    pr  | precision <n>         "PRECISION"\n" \
-                    "    tr  | truncate  <n>         "TRUNCATE "\n" \
-                    "    fmt | format    <fmt>       "FORMAT   "\n" \
-                    "    rat | rational              "RATIONAL "\n"
+                    "    ob  | obase     <n>         "DESC_OBASE    "\n" \
+                    "    ib  | ibase     <n>         "DESC_IBASE    "\n" \
+                    "    pr  | precision <n>         "DESC_PRECISION"\n" \
+                    "    tr  | truncate  <n>         "DESC_TRUNCATE "\n" \
+                    "    fmt | format    <fmt>       "DESC_FORMAT   "\n" \
+                    "    rat | rational              "DESC_RATIONAL "\n"
 
 extern const char cli_help[];
 extern const char repl_help[];

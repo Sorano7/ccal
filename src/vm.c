@@ -774,30 +774,29 @@ Value *vm_run(VM *v, StringView input, Source *src)
 
     DA_FOR(&lines, i)
     {
+        size_t offset = src ? source_get_offset(src) : 0;
+
         StringView line = da_at(&lines, i);
         if (line.len == 0 || sv_equal(line, "\n"))
             continue;
+
         str_append(&in, line);
-
-        size_t offset = 0;
-
         while (!vm_is_complete(v, SV(in)))
         {
-            if (src) source_append_line(src, line);
             line = da_at(&lines, ++i);
             str_append(&in, line);
         }
+        if (src) source_append_line(src, SV(in));
 
         Value *next = vm_run_next(v, SV(in), offset);
-        if (next && next->kind != VAL_VOID)
+        if (!next) continue;
+        if (next->kind != VAL_VOID)
             out = next;
-
-        if (src) source_append_line(src, line);
 
         if (value_is_err(out)) break;
 
         if (i < lines.len-1)
-            value_release(&next);
+            value_release(&out);
 
         str_reset(&in);
     }

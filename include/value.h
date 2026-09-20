@@ -126,10 +126,11 @@ bool value_to_bool(const Value *v);
 
 BuiltinKind builtin_kind(const Expr *e);
 
-void scope_release(Scope **sp);
-void scope_release_r(Scope **sp);
 Scope *scope_from(Scope *parent);
 Scope *scope_retain(Scope *s);
+void scope_reset(Scope *s);
+void scope_release(Scope **sp);
+void scope_release_r(Scope **sp);
 
 void scope_set_symbol(Scope *scope, StringView id, Value *value);
 Value *scope_get_symbol(Scope *scope, StringView id);

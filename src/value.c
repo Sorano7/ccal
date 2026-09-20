@@ -221,6 +221,18 @@ BuiltinKind builtin_kind(const Expr *e)
     return BUILTIN_NONE;
 }
 
+static void symbol_free(Symbol *sym)
+{
+    if (!sym) return;
+    if (sym->id)
+    {
+        str_free(sym->id);
+        free(sym->id);
+        sym->id = NULL;
+    }
+    value_release(&sym->value);
+}
+
 // Free a scope and all of its symbols.
 void scope_release(Scope **sp)
 {
@@ -230,17 +242,7 @@ void scope_release(Scope **sp)
     if (s->refcount <= 0) return;
     if (--s->refcount > 0) return;
 
-    DA_FOR(s, i)
-    {
-        Symbol sym = da_at(s, i);
-        if (sym.id)
-        {
-            str_free(sym.id);
-            free(sym.id);
-            da_at(s, i).id = NULL;
-        }
-        value_release(&sym.value);
-    }
+    DA_FOR(s, i) symbol_free(&da_at(s, i));
     da_free(s);
 
     if (s->parent)
@@ -303,6 +305,12 @@ void scope_set_symbol(Scope *scope, StringView id, Value *value)
     str_init_with(s.id, id);
     s.value = new_value;
     da_append(scope, s);
+}
+
+void scope_reset(Scope *s)
+{
+    DA_FOR(s, i) symbol_free(&da_at(s, i));
+    da_reset(s);
 }
 
 // Find a symbol from the scope.

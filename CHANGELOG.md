@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
+### Fixed
+- Fixed a crash with tab-completion after the session is cleared.
+
 ## [2.0.0] - 2026-09-20
 
 ### Added

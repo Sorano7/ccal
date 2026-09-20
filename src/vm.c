@@ -14,8 +14,7 @@ void vm_init(VM *v)
 // Reset the state of a VM.
 void vm_reset(VM *v)
 {
-    scope_release_r(&v->scope);
-    v->scope = scope_from(NULL);
+    scope_reset(v->scope);
     if (v->last) value_release(&v->last);
     v->last = NULL;
     v->base = BASE_DEFAULT;

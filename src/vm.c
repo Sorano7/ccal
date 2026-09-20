@@ -795,7 +795,9 @@ Value *vm_run(VM *v, StringView input, Source *src)
         if (src) source_append_line(src, SV(in));
 
         Value *next = vm_run_next(v, SV(in), offset);
-        vals[vals_count++] = next;
+
+        if (next->kind != VAL_VOID)
+            vals[vals_count++] = next;
         if (value_is_err(next)) break;
 
         str_reset(&in);

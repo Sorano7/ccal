@@ -124,6 +124,8 @@ void value_release(Value **vp);
 bool value_is_bool(const Value *v);
 bool value_to_bool(const Value *v);
 
+bool value_equal(const Value *a, const Value *b);
+
 BuiltinKind builtin_kind(const Expr *e);
 
 Scope *scope_from(Scope *parent);
@@ -149,6 +151,8 @@ typedef struct
 
     bool use_color;
 } RenderCtx;
+
+void render_ctx_default(RenderCtx *ctx);
 
 void value_render(Value *v, String *sb, RenderCtx *ctx);
 void scope_render(Scope *s, Value *ans, String *sb, RenderCtx *ctx);

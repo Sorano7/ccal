@@ -25,11 +25,16 @@ void link_config(CutUnit *u)
 void test_config(CutUnit *u)
 {
     cut_unit_init(u, "test", CUT_UNIT_EXE);
+
     cut_unit_sources(u, "tests/main.c");
     cut_unit_sources(u, "tests/creal.c");
     cut_unit_sources(u, "tests/lexer.c");
     cut_unit_sources(u, "tests/parser.c");
     cut_unit_sources(u, "tests/vm.c");
+    cut_unit_sources(u, "tests/api.c");
+
+    cut_unit_includes(u, "include");
+    cut_unit_sources(u, "src/api/ccal.c");
     core_config(u);
     link_config(u);
 }

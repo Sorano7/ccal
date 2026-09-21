@@ -182,6 +182,49 @@ bool value_to_bool(const Value *v)
     return v->as.builtin.kind == BUILTIN_TRUE;
 }
 
+bool value_equal(const Value *a, const Value *b)
+{
+    if (a->kind != b->kind) return false;
+
+    switch (a->kind)
+    {
+        case VAL_VOID:
+            return true;
+
+        case VAL_ERROR:
+            return sv_equal(a->as.error, b->as.error);
+
+        case VAL_BUILTIN:
+            if (a->as.builtin.kind != b->as.builtin.kind)
+                return false;
+            if (a->as.builtin.arity != b->as.builtin.arity)
+                return false;
+
+            ValueList al = a->as.builtin.args;
+            ValueList bl = b->as.builtin.args;
+
+            if (al.len != bl.len) return false;
+            DA_FOR(&al, i)
+            {
+                if (!value_equal(al.data[i], bl.data[i]))
+                    return false;
+            }
+            return true;
+
+        case VAL_EXACT:
+            return mpq_equal(a->as.exact, b->as.exact);
+
+        case VAL_LAMBDA:
+            return expr_equal(a->as.lambda.expr, b->as.lambda.expr);
+
+        case VAL_REAL:
+            return cr_approx(a->as.real, b->as.real);
+
+        default:
+            UNREACHABLE();
+    }
+}
+
 const char *builtin_to_str[] = {
     [BUILTIN_NONE]  = "",
     [BUILTIN_HOLE]  = "_",
@@ -349,6 +392,16 @@ void matching_symbol_list(const Scope *scope, StringView name, SVList *sl)
         if (sv_startswith(b, name))
             da_append(sl, b);
     }
+}
+
+void render_ctx_default(RenderCtx *ctx)
+{
+    ctx->base          = 10;
+    ctx->prec          = 50;
+    ctx->max_digits    = 10;
+    ctx->fmt           = FMT_AUTO;
+    ctx->show_rational = false;
+    ctx->use_color     = false;
 }
 
 #define appendc(c) do { \

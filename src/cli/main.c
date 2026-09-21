@@ -13,14 +13,10 @@ int main(int argc, char **argv)
     VM vm;
     vm_init(&vm);
 
-    RenderCtx ctx = {
-        .base          = 10,
-        .prec          = 50,
-        .max_digits    = 10,
-        .fmt           = FMT_AUTO,
-        .show_rational = false,
-        .use_color     = isatty(fileno(stdout)),
-    };
+    RenderCtx ctx;
+    render_ctx_default(&ctx);
+    ctx.use_color = isatty(fileno(stdout));
+
     StringView fmt = SV("auto");
 
     CutFlagParser fp;

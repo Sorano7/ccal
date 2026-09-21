@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
+### Added
+- Public interpreter API.
+
 ### Fixed
 - Fixed a crash with tab-completion after the session is cleared.
 

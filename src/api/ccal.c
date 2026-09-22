@@ -180,7 +180,8 @@ static CCalResult result_ok(CCalValue *val)
 
 CCalResult ccal_eval(CCalVM *vm, const char *src)
 {
-    Value *val = vm_run(&vm->vm, SV(src), &vm->src);
+    Source *s = ccal_expr_complete(vm, src) ? &vm->src : NULL;
+    Value *val = vm_run(&vm->vm, SV(src), s);
     CCalValue *out = malloc(sizeof(CCalValue));
     out->value = val;
 

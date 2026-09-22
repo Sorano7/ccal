@@ -163,6 +163,11 @@ bool ccal_equal(const CCalValue *a, const CCalValue *b)
  * Parsing/Evaluating
  ************************************/
 
+bool ccal_expr_complete(CCalVM *vm, const char *src)
+{
+    return vm_is_complete(&vm->vm, SV(src));
+}
+
 static CCalResult result_error(CCalValue *err, CcalError code)
 {
     return (CCalResult){.ok=false, .value=err, .error=code};
@@ -175,9 +180,6 @@ static CCalResult result_ok(CCalValue *val)
 
 CCalResult ccal_eval(CCalVM *vm, const char *src)
 {
-    if (!vm_is_complete(&vm->vm, SV(src)))
-        return result_error(NULL, CCAL_ERR_INCOMPLETE);
-
     Value *val = vm_run(&vm->vm, SV(src), &vm->src);
     CCalValue *out = malloc(sizeof(CCalValue));
     out->value = val;

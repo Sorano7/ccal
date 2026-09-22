@@ -90,6 +90,7 @@ typedef struct
     CcalError error;
 } CCalResult;
 
+bool ccal_expr_complete(CCalVM *vm, const char *src);
 CCalResult ccal_eval(CCalVM *vm, const char *src);
 
 

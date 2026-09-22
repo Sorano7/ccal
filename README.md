@@ -1,5 +1,9 @@
 # ccal
-An arbitrary-precision calculator written in C.
+ccal is a minimal scripting language specializing in arbitrary-precision calculation.
+
+Stands for `Compute and Compose Arbitrarily: the Language` (tentative) and obviously not `C Calculator`. Obviously.
+
+See also: [ccal-gui](https://github.com/Sorano7/ccal-gui).
 
 ## Quick Start
 

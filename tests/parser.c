@@ -223,6 +223,8 @@ TEST(leading_zero_base_prefix)
 {
     Expr *e = NULL;
 
+    PARSE_FAIL("0x", 10);
+
     PARSE(e, "0x10", 10);
     NUM_EQ(e, 16, 1);
 

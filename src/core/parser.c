@@ -255,17 +255,17 @@ static Expr *parse_number_part(Parser *p, DigitArray *ds, DigitFormat fmt, bool 
 }
 
 // Try parsing a base prefix in the form of a leading zero.
-static bool try_parse_base_prefix(Token *t, unsigned long *base)
+static bool try_parse_base_prefix(Token t, unsigned long *base)
 {
-    if (t->kind != TOK_ALNUM) return false;
+    if (t.kind != TOK_ALNUM) return false;
 
-    if (sv_startswith(SV(t->value), SV("0x")))
+    if (sv_startswith(SV(t.value), SV("0x")))
         *base = 16;
-    else if (sv_startswith(SV(t->value), SV("0b")))
+    else if (sv_startswith(SV(t.value), SV("0b")))
         *base = 2;
-    else if (sv_startswith(SV(t->value), SV("0o")))
+    else if (sv_startswith(SV(t.value), SV("0o")))
         *base = 8;
-    else if (sv_startswith(SV(t->value), SV("0d")))
+    else if (sv_startswith(SV(t.value), SV("0d")))
         *base = 10;
     else
         return false;
@@ -282,7 +282,9 @@ static Expr *parse_number(Parser *p, DigitFormat fmt)
     literal_init(&lit);
 
     unsigned long prev_base = p->base;
-    bool has_base = try_parse_base_prefix(&token(p), &p->base);
+    bool has_base = try_parse_base_prefix(token(p), &p->base);
+    if (has_base && token(p).value.len <= 2)
+        return expr_err(tspan(p), "Expected number");
 
     if ((e = parse_number_part(p, &lit.I, fmt, has_base, &s)))
         goto cleanup;
@@ -337,7 +339,7 @@ static Expr *parse_base_tag(Parser *p)
     if (p->base <= 1)
         return expr_err(s, "Base must be at least 2");
     if (!is_sexpr(p))
-        return expr_err(tspan(p), "Base prefix must precede expression");
+        return expr_err(tspan(p), "Expected number or grouped expression");
 
     Expr *e = parse_expr(p, PREC_BASE);
     p->base = prev_base;
@@ -351,7 +353,7 @@ static Expr *parse_neg(Parser *p)
     MUST_CONSUME(p, TOK_MINUS);
 
     if (!is_sexpr(p))
-        return expr_err(tspan(p), "Expected number or group");
+        return expr_err(tspan(p), "Expected number or grouped expression");
 
     Expr *e = parse_expr(p, PREC_PREFIX);
     if (!expr_ok(e)) return e;

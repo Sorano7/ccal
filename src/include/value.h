@@ -44,14 +44,6 @@ typedef enum
 extern const char *vk_to_str[];
 extern const char *builtin_to_str[];
 
-typedef struct Value Value;
-
-typedef struct
-{
-    Value **data;
-    size_t len, cap;
-} ValueList;
-
 typedef struct Scope Scope;
 
 // A value that an expression can evaluate to.
@@ -65,7 +57,8 @@ typedef struct Value
         {
             BuiltinKind kind;
             size_t arity;
-            ValueList args;
+            size_t len;
+            struct Value **args;
         } builtin;
 
         mpq_t exact;

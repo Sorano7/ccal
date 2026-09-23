@@ -276,7 +276,7 @@ TEST(boolean_application)
 
         EVAL("'true 1");
         CUT_CHECK(val->kind == VAL_BUILTIN);
-        CUT_CHECK(val->as.builtin.args.len == 1);
+        CUT_CHECK(val->as.builtin.len == 1);
 
         EVAL("'true 1 2");
         NUM_EQ(val, 1, 1);

@@ -46,7 +46,8 @@ Value *value_builtin(Span span, BuiltinKind kind, size_t arity)
     Value *v = value_new(VAL_BUILTIN, span);
     v->as.builtin.kind = kind;
     v->as.builtin.arity = arity;
-    da_init(&v->as.builtin.args);
+    v->as.builtin.len = 0;
+    v->as.builtin.args = calloc(1, arity * sizeof(Value *));
     return v;
 }
 
@@ -153,7 +154,7 @@ void value_release(Value **vp)
             break;
 
         case VAL_BUILTIN:
-            da_free(&v->as.builtin.args);
+            free(v->as.builtin.args);
             break;
 
         case VAL_VOID:
@@ -200,13 +201,15 @@ bool value_equal(const Value *a, const Value *b)
             if (a->as.builtin.arity != b->as.builtin.arity)
                 return false;
 
-            ValueList al = a->as.builtin.args;
-            ValueList bl = b->as.builtin.args;
+            Value **aargs = a->as.builtin.args;
+            Value **bargs = b->as.builtin.args;
+            size_t alen = a->as.builtin.len;
+            size_t blen = b->as.builtin.len;
 
-            if (al.len != bl.len) return false;
-            DA_FOR(&al, i)
+            if (alen != blen) return false;
+            for (size_t i = 0; i < alen; i++)
             {
-                if (!value_equal(al.data[i], bl.data[i]))
+                if (!value_equal(aargs[i], bargs[i]))
                     return false;
             }
             return true;
@@ -516,7 +519,7 @@ static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
 {
     appendc(ACOLOR_YELLOW);
 
-    int applied = v->as.builtin.args.len;
+    int applied = v->as.builtin.len;
     int needs = v->as.builtin.arity - applied;
 
     bool as_lambda = applied > 0;
@@ -534,7 +537,7 @@ static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
         for (int i = 0; i < applied; i++)
         {
             str_append(sb, " ");
-            value_render(da_at(&v->as.builtin.args, i), sb, ctx);
+            value_render(v->as.builtin.args[i], sb, ctx);
             appendc(ACOLOR_YELLOW);
         }
 

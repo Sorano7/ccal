@@ -189,7 +189,7 @@ static Value *eval_lambda_apply(VM *v, const Value *f, Value *arg)
 static Value *eval_builtin_bool(Value *f, Value *arg)
 {
     if (!value_to_bool(f)) return value_retain(arg);
-    return value_retain(da_at(&f->as.builtin.args, 0));
+    return value_retain(f->as.builtin.args[0]);
 }
 
 #define ENSURE_REAL(val, cr) do { \
@@ -223,7 +223,7 @@ static Value *eval_builtin_real_unary(CRUnary fn, const Value *arg)
 // Evaluate a builtin binary function on real values.
 static Value *eval_builtin_real_binary(const Value *f, CRBinary fn, const Value *right)
 {
-    Value *left = da_at(&f->as.builtin.args, 0);
+    Value *left = f->as.builtin.args[0];
 
     Value *out = NULL;
     Span span = {left->span.from, right->span.to};
@@ -257,9 +257,9 @@ done:
 // Evaluate builtin application.
 static Value *eval_builtin_apply(Value *f, Value *arg)
 {
-    if (f->as.builtin.args.len + 1 < f->as.builtin.arity)
+    if (f->as.builtin.len + 1 < f->as.builtin.arity)
     {
-        da_append(&f->as.builtin.args, value_retain(arg));
+        f->as.builtin.args[f->as.builtin.len++] = value_retain(arg);
         return value_retain(f);
     }
 

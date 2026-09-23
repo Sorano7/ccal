@@ -29,6 +29,7 @@
     ccal_release(__want); \
 } while (0)
 
+
 TEST(api_basic_eval_test)
 {
     CCalVM *vm = ccal_create();
@@ -39,5 +40,20 @@ TEST(api_basic_eval_test)
     ccal_set_ibase(vm, 16);
     EVAL_EQ(vm, "a + b", ccal_exact_ui(21, 1));
 
+    ccal_free(vm);
+}
+
+TEST(host_set_global_variable)
+{
+    CCalVM *vm = ccal_create();
+
+    EVAL_FAIL(vm, "'foo", CCAL_ERR_RUNTIME);
+
+    CCalValue *val = ccal_exact_ui(100, 1);
+    ccal_set_global(vm, "foo", val);
+
+    EVAL_EQ(vm, "'foo", val);
+
+    ccal_release(val);
     ccal_free(vm);
 }

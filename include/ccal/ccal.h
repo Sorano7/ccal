@@ -74,6 +74,13 @@ bool ccal_equal(const CCalValue *a, const CCalValue *b);
 
 
 /************************************
+ * Host -> VM
+ ************************************/
+
+void ccal_set_global(CCalVM *vm, const char *id, CCalValue *val);
+
+
+/************************************
  * Parsing/Evaluating
  ************************************/
 

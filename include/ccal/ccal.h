@@ -98,8 +98,16 @@ bool ccal_equal(const CCalValue *a, const CCalValue *b);
  * Host -> VM
  ************************************/
 
+typedef CCalValue *(*CCalNativeFn)(CCalVM *vm, CCalValue **argv, void *ud);
+#define CCAL_NATIVE_FN(name) CCalValue *(name)(CCalVM *vm, CCalValue **argv, void *ud)
+
+typedef struct CCalNative CCalNative;
+
 void ccal_set_global(CCalVM *vm, const char *id, CCalValue *val);
 
+CCalNative *ccal_native(CCalVM *vm, CCalNativeFn fn, size_t arity, void *ud);
+void ccal_native_free(CCalNative *native);
+void ccal_set_native(CCalVM *vm, const char *id, const CCalNative *native);
 
 /************************************
  * Parsing/Evaluating

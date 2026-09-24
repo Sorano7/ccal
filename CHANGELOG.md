@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Added
 - Public interpreter API.
+- Register native functions via API.
 
 ### Fixed
 - No longer crashes on tab-completion after the session is cleared.

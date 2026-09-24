@@ -218,6 +218,46 @@ void ccal_set_global(CCalVM *vm, const char *id, CCalValue *val)
     scope_set_symbol(vm->vm.scope, SV(id), val->value, false);
 }
 
+typedef struct CCalNative
+{
+    CCalVM *vm;
+    CCalNativeFn fn;
+    size_t arity;
+    void *ud;
+} CCalNative;
+
+CCalNative *ccal_native(CCalVM *vm, CCalNativeFn fn, size_t arity, void *ud)
+{
+    CCalNative *out = malloc(sizeof(CCalNative));
+    out->arity = arity;
+    out->vm = vm;
+    out->fn = fn;
+    out->ud = ud;
+    return out;
+}
+
+void ccal_native_free(CCalNative *native)
+{
+    free(native);
+}
+
+NATIVE_FN(public_native_adapter)
+{
+    (void)v;
+    CCalNative *native = ud;
+    CCalValue **pub_argv = malloc(sizeof(CCalValue *) * native->arity);
+    for (size_t i = 0; i < native->arity; i++)
+        pub_argv[i] = value_wrap(argv[i]);
+
+    CCalValue *result = native->fn(native->vm, pub_argv, native->ud);
+    return result->value;
+}
+
+void ccal_set_native(CCalVM *vm, const char *id, const CCalNative *native)
+{
+    vm_set_native(&vm->vm, SV(id), public_native_adapter, native->arity, (void *)native);
+}
+
 
 /************************************
  * Parsing/Evaluating

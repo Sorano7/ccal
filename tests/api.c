@@ -57,3 +57,29 @@ TEST(host_set_global_variable)
     ccal_release(val);
     ccal_free(vm);
 }
+
+CCAL_NATIVE_FN(native_eq)
+{
+    (void)vm, (void)ud;
+
+    CCalValue *l = argv[0];
+    CCalValue *r = argv[1];
+    bool v = ccal_equal(l, r);
+    return ccal_bool(v);
+}
+
+TEST(host_native_fn)
+{
+    CCalVM *vm =ccal_create();
+
+    EVAL_FAIL(vm, "1 `my_eq` 2", CCAL_ERR_RUNTIME);
+
+    CCalNative *eq = ccal_native(vm, native_eq, 2, NULL);
+    ccal_set_native(vm, "my_eq", eq);
+
+    EVAL_EQ(vm, "1 `my_eq` 2", ccal_bool(false));
+    EVAL_EQ(vm, "'true `my_eq` 'true", ccal_bool(true));
+
+    ccal_native_free(eq);
+    ccal_free(vm);
+}

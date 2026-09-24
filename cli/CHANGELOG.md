@@ -5,15 +5,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
-### Added
-- Public interpreter API.
-- Register native functions via API.
-
 ### Fixed
 - No longer crashes on tab-completion after the session is cleared.
 - No longer crashes when leading zero prefix is not followed by digits (e.g., `0x`).
-- Native lambdas no longer incorrectly mutate state across calls.
-
 
 ## [2.0.0] - 2026-09-20
 

@@ -159,14 +159,18 @@ void vm_init(VM *v)
     register_builtin_consts(v);
 }
 
-// Reset the state of a VM.
-void vm_reset(VM *v)
+void vm_reset_state(VM *v)
 {
     scope_reset(v->scope);
     if (v->last) value_release(&v->last);
+    register_builtin_consts(v);
+}
+
+void vm_reset_all(VM *v)
+{
+    vm_reset_state(v);
 
     vm_ctx_default(v);
-
     da_reset(&v->natives);
     register_builtin_natives(v);
 }

@@ -40,7 +40,8 @@ typedef struct
 
 CCalVM *ccal_create(void);
 void ccal_free(CCalVM *vm);
-void ccal_reset(CCalVM *vm);
+void ccal_reset_state(CCalVM *vm);
+void ccal_reset_all(CCalVM *vm);
 
 #define CCAL_SETTER(T, id) void ccal_set_##id(CCalVM *vm, T id)
 #define CCAL_GETTER(T, id) T ccal_get_##id(CCalVM *vm)

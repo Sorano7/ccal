@@ -165,7 +165,7 @@ static bool handle_command(CCalVM *vm, StringView input)
     }
     else if (is_either(cmd, "c", "clear"))
     {
-        ccal_reset(vm);
+        ccal_reset_state(vm);
         printf("Cleared.\n");
     }
     else if (is_either(cmd, "s", "set"))
@@ -178,6 +178,7 @@ static bool handle_command(CCalVM *vm, StringView input)
         printc(ACOLOR_CYAN, repl_help);
     }
 
+    if (ccal_get_show_color(vm)) printf(AFMT_RESET);
     return exit;
 }
 

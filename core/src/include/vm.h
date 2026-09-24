@@ -40,7 +40,8 @@ typedef struct VM
 } VM;
 
 void vm_init(VM *v);
-void vm_reset(VM *v);
+void vm_reset_state(VM *v);
+void vm_reset_all(VM *v);
 void vm_free(VM *v);
 
 void vm_set_native(VM *v, StringView id, NativeFn fn, size_t arity, void *ud);

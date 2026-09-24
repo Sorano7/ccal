@@ -44,10 +44,16 @@ void ccal_free(CCalVM *vm)
     source_free(&vm->src);
 }
 
-void ccal_reset(CCalVM *vm)
+void ccal_reset_state(CCalVM *vm)
 {
-    vm_reset(&vm->vm);
+    vm_reset_state(&vm->vm);
     source_reset(&vm->src);
+}
+
+void ccal_reset_all(CCalVM *vm)
+{
+    ccal_reset_state(vm);
+    vm_reset_all(&vm->vm);
 }
 
 CCAL_SETTER(const CCalCtx *, ctx)

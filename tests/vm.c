@@ -52,7 +52,7 @@
 
 #define BOOL_EQ(v, b) do { \
     CUT_MUST(value_is_bool(v)); \
-    CUT_CHECK(value_to_bool(v) == (b)); \
+    CUT_CHECK(native_to_bool(v) == (b)); \
 } while (0)
 
 #define RENDER_EQ(got, want) do { \
@@ -99,7 +99,7 @@ TEST(integer_render_correct)
         EVAL_RENDER("16#FF");
         RENDER_EQ(sb, "255");
 
-        vm.ctx.ibase = 16;
+        vm.ctx.obase = 16;
         EVAL_RENDER("255");
         // GMP defaults to lowercase for base <= 36
         RENDER_EQ(sb, "16#ff");

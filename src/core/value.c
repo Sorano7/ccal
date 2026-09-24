@@ -10,7 +10,6 @@ const char *vk_to_str[] = {
     [VAL_LAMBDA]  = "lambda",
 };
 
-
 static Value *value_new(ValueKind kind, Span span)
 {
     Value *v = malloc(sizeof(Value));
@@ -41,9 +40,28 @@ Value *value_real(Span span, CR *n)
     return v;
 }
 
+NATIVE_FN(native_bool)
+{
+    (void)v;
+    return ud ? argv[0] : argv[1];
+}
+
 Value *value_bool(Span span, bool b)
 {
-    UNREACHABLE();
+    Value *out = value_native(native_bool, 2, (void *)b);
+    out->span = span;
+    return out;
+}
+
+bool value_is_bool(const Value *val)
+{
+    return val->kind == VAL_NATIVE && val->as.native.fn == native_bool;
+}
+
+bool native_to_bool(const Value *val)
+{
+    DEV_MUST(value_is_bool(val));
+    return (bool)val->as.native.ud;
 }
 
 Value *value_lambda(const Expr *e, Scope *s)
@@ -123,10 +141,29 @@ Value *value_error_value_kind_s(const Value *got, StringView want)
             SV_ARG(want), vk_to_str[got->kind]);
 }
 
+static Value *native_clone(Value *from)
+{
+    Value *v = value_native(from->as.native.fn, from->as.native.arity, from->as.native.ud);
+    v->span = from->span;
+    v->as.native.argc = from->as.native.argc;
+    for (size_t i = 0; i < from->as.native.argc; i++)
+        v->as.native.argv[i] = value_retain(from->as.native.argv[i]);
+    return v;
+}
+
 Value *value_retain(Value *from)
 {
-    if (from) from->refcount++;
-    return from;
+    if (!from) return NULL;
+
+    switch (from->kind)
+    {
+        case VAL_NATIVE:
+            return native_clone(from);
+
+        default:
+            from->refcount++;
+            return from;
+    }
 }
 
 void value_release(Value **vp)
@@ -169,18 +206,6 @@ void value_release(Value **vp)
     *vp = NULL;
 }
 
-// Checks if a value is a bool value.
-bool value_is_bool(const Value *v)
-{
-    UNREACHABLE();
-}
-
-// Use a builtin boolean value as bool.
-bool value_to_bool(const Value *v)
-{
-    UNREACHABLE();
-}
-
 bool value_equal(const Value *a, const Value *b)
 {
     if (a->kind != b->kind) return false;
@@ -194,8 +219,15 @@ bool value_equal(const Value *a, const Value *b)
             return sv_equal(a->as.error, b->as.error);
 
         case VAL_NATIVE:
-            UNREACHABLE();
-            break;
+            if (a->as.native.arity != b->as.native.arity)
+                return false;
+            if (a->as.native.argc != b->as.native.argc)
+                return false;
+            if (a->as.native.fn != b->as.native.fn)
+                return false;
+            if (a->as.native.ud != b->as.native.ud)
+                return false;
+            return true;
 
         case VAL_EXACT:
             return mpq_equal(a->as.exact, b->as.exact);
@@ -272,19 +304,20 @@ Scope *scope_retain(Scope *s)
 }
 
 // Assign a symbol to the scope.
-void scope_set_symbol(Scope *scope, StringView id, Value *value)
+Value *scope_set_symbol(Scope *scope, StringView id, Value *value, bool constant)
 {
-    Value *new_value = NULL;
     if (value)
     {
-        new_value = value_retain(value);
         DA_FOREACH(scope, Symbol, sym)
         {
             if (sv_equal(sym->id, id))
             {
+                if (sym->constant)
+                    return value_errorf(value->span, "Cannot reassign constant");
+
                 value_release(&sym->value);
-                sym->value = new_value;
-                return;
+                sym->value = value_retain(value);
+                return NULL;
             }
         }
     }
@@ -292,8 +325,10 @@ void scope_set_symbol(Scope *scope, StringView id, Value *value)
     Symbol s = {0};
     s.id = malloc(sizeof(String));
     str_init_with(s.id, id);
-    s.value = new_value;
+    s.value = value_retain(value);
+    s.constant = constant;
     da_append(scope, s);
+    return NULL;
 }
 
 void scope_reset(Scope *s)

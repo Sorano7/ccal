@@ -142,7 +142,7 @@ static void handle_set_command(CCalVM *vm, StringView input)
 
 static bool handle_command(CCalVM *vm, StringView input)
 {
-    printc(ACOLOR_CYAN, "");
+    if (ccal_get_show_color(vm)) printf(ACOLOR_CYAN);
 
     input = sv_trim(input);
     StringView cmd = sv_split(&input, ' ');
@@ -181,30 +181,28 @@ static bool handle_command(CCalVM *vm, StringView input)
     return exit;
 }
 
+static const CCalVM *vm_ref;
+
 // Generate a symbol completion from user-defined and builtin pools.
 char *symbol_generator(const char *text, int state)
 {
-    static size_t idx;
-    static SVList list = {0};
+    static size_t idx, len;
+    static char **symbols = NULL;
 
     if (!state)
     {
         idx = 0;
-
-        if (!list.data)
-        {
-            da_init(&list);
-        }
-        else
-        {
-            da_reset(&list);
-        }
-        // matching_symbol_list(env, SV(text), &list);
+        if (symbols) ccal_free_symbols(symbols, len);
+        symbols = ccal_symbols(vm_ref, &len);
+        if (!symbols) return NULL;
     }
 
-    while (idx < list.len)
-        return sv_alloc_cstr(list.data[idx++]);
-
+    while (idx < len)
+    {
+        char *symbol = symbols[idx++];
+        if (sv_startswith(SV(symbol), SV(text)))
+            return strdup(symbol);
+    }
     return NULL;
 }
 
@@ -349,6 +347,8 @@ void repl_start(const CCalCtx *ctx)
 
     CCalVM *vm = ccal_create();
     ccal_set_ctx(vm, ctx);
+
+    vm_ref = vm;
 
     String sb;
     str_reserve(&sb, 256);

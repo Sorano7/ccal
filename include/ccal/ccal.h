@@ -62,6 +62,11 @@ CCAL_GETTER(CCalRenderFmt,   format);
 CCAL_GETTER(bool,            show_color);
 CCAL_GETTER(bool,            show_rational);
 
+bool ccal_has_symbol(const CCalVM *vm, const char *id);
+CCalValue *ccal_get_symbol(const CCalVM *vm, const char *id);
+
+char **ccal_symbols(const CCalVM *vm, size_t *len);
+void ccal_free_symbols(char **symbols, size_t len);
 
 /************************************
  * Value Handling

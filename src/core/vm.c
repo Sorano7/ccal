@@ -3,22 +3,125 @@
 #include "parser.h"
 #include <stdarg.h>
 
-NATIVE_FN(native_true)
+#define ENSURE_REAL(val, cr) do { \
+    switch ((val)->kind) { \
+        case VAL_REAL:  (cr) = cr_retain((val)->as.real);    break; \
+        case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
+        default:        return value_error_value_kind_s(val, SV("number")); break; \
+    } \
+} while (0)
+
+NATIVE_FN(native_real_unary)
 {
-    (void)v, (void)ud;
-    return argv[0];
+    (void)v;
+
+    CRUnary fn = ud;
+
+    Value *arg = argv[0];
+    CR *x = NULL;
+
+    ENSURE_REAL(arg, x);
+    if (cr_is_error(x))
+        return value_error_from_cr(arg->span, x);
+
+    Value *out = NULL;
+    CR *n = fn(x);
+
+    if (cr_is_error(n))
+        out = value_error_from_cr(arg->span, n);
+    else
+        out = value_real(arg->span, n);
+    cr_release(&x);
+    return out;
 }
 
-NATIVE_FN(native_false)
+NATIVE_FN(native_real_binary)
 {
-    (void)v, (void)ud;
-    return argv[1];
+    (void)v;
+
+    CRBinary fn = ud;
+
+    Value *l = argv[0], *r = argv[1];
+    Span span = {l->span.from, r->span.to};
+
+    Value *out = NULL;
+
+    CR *lr = NULL, *rr = NULL;
+    ENSURE_REAL(l, lr);
+    if (cr_is_error(lr))
+    {
+        out = value_error_from_cr(span, lr);
+        goto done;
+    }
+    ENSURE_REAL(r, rr);
+    if (cr_is_error(rr))
+    {
+        out = value_error_from_cr(span, rr);
+        goto done;
+    }
+
+    CR *n = fn(lr, rr);
+    if (cr_is_error(n))
+        out = value_error_from_cr(span, n);
+    else
+        out = value_real(span, n);
+
+done:
+    cr_release(&lr);
+    cr_release(&rr);
+    return out;
 }
 
+static StringView vm_get_native_name(VM *v, Value *val)
+{
+    DA_FOREACH(&v->natives, NativeEntry, entry)
+    {
+        if (entry->fn != val->as.native.fn)
+            continue;
+        if (entry->arity != val->as.native.arity)
+            continue;
+        if (entry->ud != val->as.native.ud)
+            continue;
+
+        return SV(entry->id);
+    }
+    return SV("");
+}
+
+static Value *vm_get_native(VM *v, StringView name)
+{
+    DA_FOREACH(&v->natives, NativeEntry, entry)
+    {
+        if (sv_equal(name, entry->id))
+            return value_native(entry->fn, entry->arity, entry->ud);
+    }
+    return NULL;
+}
+
+static bool vm_has_native_name(VM *v, StringView name)
+{
+    DA_FOREACH(&v->natives, NativeEntry, entry)
+        if (sv_equal(entry->id, name)) return true;
+    return false;
+}
+
+// Register all builtin native values.
 static void register_builtin_natives(VM *v)
 {
-    vm_set_native(v, SV("true"),  native_true,  2, NULL);
-    vm_set_native(v, SV("false"), native_false, 2, NULL);
+    vm_set_native(v, SV("true"),  native_bool,        2, (void *)true);
+    vm_set_native(v, SV("false"), native_bool,        2, (void *)false);
+    vm_set_native(v, SV("sqrt"),  native_real_unary,  1, cr_sqrt);
+    vm_set_native(v, SV("exp"),   native_real_unary,  1, cr_exp);
+    vm_set_native(v, SV("ln"),    native_real_unary,  1, cr_ln);
+    vm_set_native(v, SV("mod"),   native_real_binary, 2, cr_mod);
+    vm_set_native(v, SV("pow"),   native_real_binary, 2, cr_pow);
+    vm_set_native(v, SV("log"),   native_real_binary, 2, cr_log);
+}
+
+static void register_builtin_consts(VM *v)
+{
+    scope_set_symbol(v->scope, SV("pi"), value_real((Span){0}, cr_pi()), true);
+    scope_set_symbol(v->scope, SV("e"), value_real((Span){0}, cr_e()), true);
 }
 
 void vm_set_native(VM *v, StringView id, NativeFn fn, size_t arity, void *ud)
@@ -53,6 +156,7 @@ void vm_init(VM *v)
 
     da_init(&v->natives);
     register_builtin_natives(v);
+    register_builtin_consts(v);
 }
 
 // Reset the state of a VM.
@@ -85,16 +189,21 @@ static Value *eval_number(const Expr *e)
 // Evaluate an identifier
 static Value *eval_ident(VM *v, const Expr *e)
 {
-    DA_FOREACH(&v->natives, NativeEntry, entry)
-    {
-        if (sv_equal(e->as.id, entry->id))
-            return value_native(entry->fn, entry->arity, entry->ud);
-    }
+    if (vm_has_native_name(v, SV(e->as.id)))
+        return vm_get_native(v, SV(e->as.id));
 
-    Value *out = scope_get_symbol(v->scope, SV(e->as.id));
+    Value *out = NULL;
+
+    if (sv_equal(e->as.id, "ans"))
+        out = value_retain(v->last);
+    else if (sv_equal(e->as.id, "_"))
+        out = value_void(e->span);
+    else
+        out = scope_get_symbol(v->scope, SV(e->as.id));
+
     if (!out) return value_errorf(e->span, "Undefined symbol");
-    out->span = e->span;
 
+    out->span = e->span;
     return out;
 }
 
@@ -115,7 +224,7 @@ static Value *capture_free_vars(VM *v, const Expr *e, Scope *s, SVList *params)
 
             Value *capture = scope_get_symbol(v->scope, SV(e->as.id));
             if (capture)
-                scope_set_symbol(s, SV(e->as.id), capture);
+                scope_set_symbol(s, SV(e->as.id), capture, false);
             else
                 return value_errorf(e->span, "Undefined symbol");
             break;
@@ -166,7 +275,7 @@ static Value *eval_lambda(VM *v, const Expr *e, StringView name)
     if (name.len > 0)
     {
         da_append(&p, name);
-        scope_set_symbol(s, name, NULL);
+        scope_set_symbol(s, name, NULL, false);
     }
 
     Value *err = capture_free_vars(v, e->as.lambda.body, s, &p);
@@ -179,7 +288,7 @@ static Value *eval_lambda(VM *v, const Expr *e, StringView name)
 
     Value *out = value_lambda(e, s);
     out->refcount--;
-    scope_set_symbol(s, name, out);
+    scope_set_symbol(s, name, out, true);
     da_free(&p);
     return out;
 }
@@ -193,7 +302,7 @@ static Value *eval_lambda_apply(VM *v, const Value *f, Value *arg)
 
     const Expr *func = f->as.lambda.expr;
     if (func->as.lambda.param->kind == EXPR_IDENT)
-        scope_set_symbol(v->scope, SV(func->as.lambda.param->as.id), arg);
+        scope_set_symbol(v->scope, SV(func->as.lambda.param->as.id), arg, false);
     Value *out = eval_expr(v, func->as.lambda.body);
 
     v->scope = prev;
@@ -201,103 +310,16 @@ static Value *eval_lambda_apply(VM *v, const Value *f, Value *arg)
     return out;
 }
 
-#define ENSURE_REAL(val, cr) do { \
-    switch ((val)->kind) { \
-        case VAL_REAL:  (cr) = cr_retain((val)->as.real);    break; \
-        case VAL_EXACT: (cr) = cr_from_mpq((val)->as.exact); break; \
-        default:        return value_error_value_kind_s(val, SV("number")); break; \
-    } \
-} while (0)
-
-// // Evaluate a builtin unary function on real values.
-// static Value *eval_builtin_real_unary(CRUnary fn, const Value *arg)
-// {
-//     CR *x = NULL;
-//     ENSURE_REAL(arg, x);
-//     if (cr_is_error(x))
-//         return value_error_from_cr(arg->span, x);
-//
-//     Value *out = NULL;
-//
-//     CR *n = fn(x);
-//     if (cr_is_error(n))
-//         out = value_error_from_cr(arg->span, n);
-//     else
-//         out = value_real(arg->span, fn(x));
-//
-//     cr_release(&x);
-//     return out;
-// }
-//
-// // Evaluate a builtin binary function on real values.
-// static Value *eval_builtin_real_binary(const Value *f, CRBinary fn, const Value *right)
-// {
-//     Value *left = f->as.builtin.args[0];
-//
-//     Value *out = NULL;
-//     Span span = {left->span.from, right->span.to};
-//
-//     CR *l = NULL, *r = NULL;
-//     ENSURE_REAL(left, l);
-//     if (cr_is_error(l))
-//     {
-//         out = value_error_from_cr(span, l);
-//         goto done;
-//     }
-//     ENSURE_REAL(right, r);
-//     if (cr_is_error(r))
-//     {
-//         out = value_error_from_cr(span, r);
-//         goto done;
-//     }
-//
-//     CR *n = fn(l, r);
-//     if (cr_is_error(n))
-//         out = value_error_from_cr(span, n);
-//     else
-//         out = value_real(span, fn(l, r));
-//
-// done:
-//     cr_release(&l);
-//     cr_release(&r);
-//     return out;
-// }
-
-// // Evaluate builtin application.
-// static Value *eval_builtin_apply(Value *f, Value *arg)
-// {
-//     if (f->as.builtin.len + 1 < f->as.builtin.arity)
-//     {
-//         f->as.builtin.args[f->as.builtin.len++] = value_retain(arg);
-//         return value_retain(f);
-//     }
-//
-//     switch (f->as.builtin.kind)
-//     {
-//         case BUILTIN_TRUE:
-//         case BUILTIN_FALSE: return eval_builtin_bool(f, arg);
-//         case BUILTIN_SQRT:  return eval_builtin_real_unary(cr_sqrt, arg);
-//         case BUILTIN_EXP:   return eval_builtin_real_unary(cr_exp, arg);
-//         case BUILTIN_LN:    return eval_builtin_real_unary(cr_ln, arg);
-//         case BUILTIN_POW:   return eval_builtin_real_binary(f, cr_pow, arg);
-//         case BUILTIN_LOG:   return eval_builtin_real_binary(f, cr_log, arg);
-//         case BUILTIN_MOD:   return eval_builtin_real_binary(f, cr_mod, arg);
-//
-//         case BUILTIN_HOLE:  return value_error_value_kind_s(f, SV("lambda"));
-//         case BUILTIN_ANS:
-//         default:            UNREACHABLE();
-//     }
-// }
-
 static Value *eval_native_apply(VM *v, Value *f, Value *arg)
 {
+    f = value_retain(f);
+
     if (f->as.native.argc < f->as.native.arity)
     {
         f->as.native.argv[f->as.native.argc++] = value_retain(arg);
 
-        // Clone instead of retain
         if (f->as.native.argc < f->as.native.arity)
-            return value_retain(f);
+            return f;
     }
 
     return f->as.native.fn(v, f->as.native.argv, f->as.native.ud);
@@ -515,9 +537,9 @@ static Value *eval_real_infix(const Value *l, const Expr *e, const Value *r)
 // Evaluate an infix operation between two booleans.
 static Value *eval_bool_infix(const Value *l, const Expr *e, const Value *r)
 {
-    bool lb = value_to_bool(l);
-    bool rb = value_to_bool(r);
-    bool vb = false;
+    bool vb;
+    bool lb = native_to_bool(l);
+    bool rb = native_to_bool(r);
 
     switch (e->as.infix.op)
     {
@@ -535,6 +557,12 @@ static Value *eval_assign_infix(VM *v, const Expr *e)
     if (l->kind != EXPR_IDENT)
         return value_error_expr_kind(l, EXPR_IDENT);
 
+    if (vm_has_native_name(v, SV(l->as.id)))
+        return value_errorf(l->span, "Cannot assign to native symbol");
+
+    if (sv_equal(l->as.id, "ans"))
+        return value_errorf(l->span, "Cannot assign to special symbol");
+
     Value *out = NULL;
     if (e->as.infix.right->kind == EXPR_LAMBDA)
         out = eval_lambda(v, e->as.infix.right, SV(l->as.id));
@@ -542,8 +570,17 @@ static Value *eval_assign_infix(VM *v, const Expr *e)
         out = eval_expr(v, e->as.infix.right);
 
     if (value_is_err(out)) return out;
-    scope_set_symbol(v->scope, SV(l->as.id), out);
 
+    if (!sv_equal(l->as.id, "_"))
+    {
+        Value *err = scope_set_symbol(v->scope, SV(l->as.id), out, false);
+        if (err)
+        {
+            err->span = l->span;
+            value_release(&out);
+            out = err;
+        }
+    }
     return out;
 }
 
@@ -663,7 +700,7 @@ static Value *eval_cond(VM *v, const Expr *e)
         return err;
     }
 
-    Value *out = value_to_bool(cond)
+    Value *out = native_to_bool(cond)
         ? eval_expr(v, e->as.cond.then)
         : eval_expr(v, e->as.cond.else_);
 
@@ -946,7 +983,38 @@ static void value_render_error(VM *v, Value *val, String *sb)
 // Render a builtin value.
 static void value_render_native(VM *v, Value *val, String *sb)
 {
-    str_append(sb, "<native>");
+    appendc(ACOLOR_YELLOW);
+    int applied = val->as.native.argc;
+    int needs = val->as.native.arity - applied;
+
+    bool as_lambda = applied > 0;
+
+    if (as_lambda)
+    {
+        for (int i = 0; i < needs; i++)
+            str_appendf(sb, "('a%d: ", i+1);
+    }
+
+    StringView name = vm_get_native_name(v, val);
+    str_appendf(sb, "'"SV_FMT, SV_ARG(name));
+
+    if (as_lambda)
+    {
+        for (int i = 0; i < applied; i++)
+        {
+            str_append(sb, " ");
+            vm_value_render(v, val->as.native.argv[i], sb);
+            appendc(ACOLOR_YELLOW);
+        }
+
+        for (int i = 0; i < needs; i++)
+            str_appendf(sb, " 'a%d", i+1);
+
+        for (int i = 0; i < needs; i++)
+            str_append(sb, ")");
+    }
+
+    appendc(AFMT_RESET);
 }
 
 #define RENDER_SUBST(e) render_with_subst(v, s, (e), params, sb)

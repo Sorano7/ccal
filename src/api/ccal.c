@@ -16,6 +16,13 @@ typedef struct CCalValue
     Value *value;
 } CCalValue;
 
+static CCalValue *value_wrap(Value *val)
+{
+    CCalValue *out = malloc(sizeof(CCalValue));
+    out->value = val;
+    return out;
+}
+
 
 /************************************
  * VM/Interpreter
@@ -86,8 +93,56 @@ CCAL_GETTER(CCalRenderFmt, format)
         case FMT_FIXED: return CCAL_FMT_FIXED_POINT;
         case FMT_SCI:   return CCAL_FMT_SCIENTIFIC;
     }
+    UNREACHABLE();
 }
 
+bool ccal_has_symbol(const CCalVM *vm, const char *id)
+{
+    CCalValue *val = ccal_get_symbol(vm, id);
+    if (!val) return false;
+
+    ccal_release(val);
+    return true;
+}
+
+CCalValue *ccal_get_symbol(const CCalVM *vm, const char *id)
+{
+    Value *val = scope_get_symbol(vm->vm.scope, SV(id));
+    if (!val) return NULL;
+
+    return value_wrap(val);
+}
+
+char **ccal_symbols(const CCalVM *vm, size_t *len)
+{
+    DEV_MUST(len);
+
+    Scope *scope = vm->vm.scope;
+    *len = scope->len + vm->vm.natives.len;
+    if (*len == 0) return NULL;
+
+    char **out = malloc(sizeof(char *) * *len);
+
+    size_t i = 0;
+
+    DA_FOREACH(scope, Symbol, sym)
+        out[i++] = strdup(sym->id->data);
+
+    DA_FOREACH(&vm->vm.natives, NativeEntry, en)
+        out[i++] = strdup(en->id.data);
+
+    return out;
+}
+
+void ccal_free_symbols(char **symbols, size_t len)
+{
+    if (!symbols) return;
+    for (size_t i = 0; i < len; i++)
+    {
+        if (symbols[i]) free(symbols[i]);
+    }
+    free(symbols);
+}
 
 /************************************
  * Value Handling
@@ -105,13 +160,6 @@ CCalValueKind ccal_get_kind(const CCalValue *val)
         case VAL_LAMBDA:  return CCAL_VAL_LAMBDA;
         default:          UNREACHABLE();
     }
-}
-
-static CCalValue *value_wrap(Value *val)
-{
-    CCalValue *out = malloc(sizeof(CCalValue));
-    out->value = val;
-    return out;
 }
 
 CCalValue *ccal_retain(CCalValue *val)
@@ -167,7 +215,7 @@ bool ccal_equal(const CCalValue *a, const CCalValue *b)
 void ccal_set_global(CCalVM *vm, const char *id, CCalValue *val)
 {
     if (!val || !val->value) return;
-    scope_set_symbol(vm->vm.scope, SV(id), val->value);
+    scope_set_symbol(vm->vm.scope, SV(id), val->value, false);
 }
 
 

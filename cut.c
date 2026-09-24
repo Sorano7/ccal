@@ -45,9 +45,13 @@ void cli_config(CutUnit *u)
     cut_unit_init(u, "cli", CUT_UNIT_EXE);
     cut_unit_sources(u, "src/cli/main.c");
     cut_unit_sources(u, "src/cli/repl.c");
-    cut_unit_libs(u, "readline", "ncursesw");
     core_config(u);
     link_config(u);
+
+    cut_unit_includes(u, "include");
+    cut_unit_libs(u, "readline", "ncursesw");
+    cut_unit_libs(u, "ccal");
+    cut_unit_lib_dirs(u, "lib");
 }
 
 void lib_config(CutUnit *u)

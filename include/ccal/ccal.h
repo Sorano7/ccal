@@ -21,7 +21,6 @@ typedef struct CCalValue  CCalValue;
 typedef enum
 {
     CCAL_FMT_AUTO,
-    CCAL_FMT_RATIONAL,
     CCAL_FMT_FIXED_POINT,
     CCAL_FMT_SCIENTIFIC,
 } CCalRenderFmt;
@@ -33,18 +32,35 @@ typedef struct
     unsigned long max_digits;
     mp_prec_t     precision;
     CCalRenderFmt render_fmt;
+    bool          show_color;
+    bool          show_rational;
 } CCalCtx;
+
+#define CCAL_CTX_DEFAULT (CCalCtx){10, 10, 10, 50, CCAL_FMT_AUTO, false, false}
 
 CCalVM *ccal_create(void);
 void ccal_free(CCalVM *vm);
 void ccal_reset(CCalVM *vm);
 
-void ccal_set_ctx(CCalVM *vm, const CCalCtx *ctx);
-void ccal_set_ibase(CCalVM *vm, unsigned long ibase);
-void ccal_set_obase(CCalVM *vm, unsigned long obase);
-void ccal_set_max_digits(CCalVM *vm, unsigned long max_digits);
-void ccal_set_precision(CCalVM *vm, mp_prec_t prec);
-void ccal_set_render_fmt(CCalVM *vm, CCalRenderFmt fmt);
+#define CCAL_SETTER(T, id) void ccal_set_##id(CCalVM *vm, T id)
+#define CCAL_GETTER(T, id) T ccal_get_##id(CCalVM *vm)
+
+CCAL_SETTER(const CCalCtx *, ctx);
+CCAL_SETTER(unsigned long,   ibase);
+CCAL_SETTER(unsigned long,   obase);
+CCAL_SETTER(unsigned long,   max_digits);
+CCAL_SETTER(mp_prec_t,       prec);
+CCAL_SETTER(CCalRenderFmt,   format);
+CCAL_SETTER(bool,            show_color);
+CCAL_SETTER(bool,            show_rational);
+
+CCAL_GETTER(unsigned long,   ibase);
+CCAL_GETTER(unsigned long,   obase);
+CCAL_GETTER(unsigned long,   max_digits);
+CCAL_GETTER(mp_prec_t,       prec);
+CCAL_GETTER(CCalRenderFmt,   format);
+CCAL_GETTER(bool,            show_color);
+CCAL_GETTER(bool,            show_rational);
 
 
 /************************************
@@ -106,5 +122,6 @@ CCalResult ccal_eval(CCalVM *vm, const char *src);
  ************************************/
 
 char *ccal_render(CCalVM *vm, const CCalValue *val);
+char *ccal_render_env(CCalVM *vm);
 
 #endif

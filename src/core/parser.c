@@ -1,7 +1,6 @@
 #include "parser.h"
 #include "lexer.h"
 #include "number.h"
-#include "value.h"
 
 #include <errno.h>
 
@@ -404,7 +403,7 @@ static Expr *parse_guards(Parser *p)
             return then;
         }
 
-        if (builtin_kind(cond) == BUILTIN_HOLE)
+        if (cond->kind == EXPR_IDENT && sv_equal(cond->as.id, "_"))
         {
             has_else = true;
             expr_destroy(&cond);

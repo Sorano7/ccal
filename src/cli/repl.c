@@ -1,4 +1,11 @@
+#ifndef _WIN32
+    #include <unistd.h>
+#endif
+
 #include "repl.h"
+#include "ccal/ccal.h"
+#include "cut.h"
+
 #include <readline/readline.h>
 #include <readline/history.h>
 
@@ -32,99 +39,91 @@ const char repl_help[] = "Commands:\n"
 ;
 
 #define printc(c, s, ...) do { \
-    if (ctx->use_color) printf(AFMT_RESET"%s", (c)); \
+    if (ccal_get_show_color(vm)) printf(AFMT_RESET"%s", (c)); \
     printf(s __VA_OPT__(,) __VA_ARGS__); \
-    if (ctx->use_color) printf(AFMT_RESET); \
+    if (ccal_get_show_color(vm)) printf(AFMT_RESET); \
 } while (0)
 
 #define appendc(sb, c, s, ...) do { \
-    if (ctx->use_color) str_appendf((sb), AFMT_RESET"%s", (c)); \
+    if (ccal_get_show_color(vm)) str_appendf((sb), AFMT_RESET"%s", (c)); \
     str_appendf((sb), (s) __VA_OPT__(,) __VA_ARGS__); \
-    if (ctx->use_color) str_append((sb), AFMT_RESET); \
+    if (ccal_get_show_color(vm)) str_append((sb), AFMT_RESET); \
 } while (0)
 
-// Setting the parameter with the set command.
-static bool repl_set_numeric(StringView s, unsigned long *v, RenderCtx *ctx)
-{
-    s = sv_trim(s);
-    if (s.len == 0)
-    {
-        printc(ACOLOR_RED, "Missing value.\n");
-        return false;
-    }
-    int val = 0;
-    if (!sv_to_int(s, &val))
-    {
-        printc(ACOLOR_RED, "Invalid value.\n");
-        return false;
-    }
-    *v = val;
-    return true;
-}
+#define is_either(str, s, l) (sv_equal((str), (s)) || sv_equal((str), (l)))
 
-// Handle the set command.
-static void repl_handle_set_command(VM *vm, RenderCtx *ctx, StringView src)
-{
-    StringView param;
-    if (sv_find(src, '=') != SIZE_MAX)
-        param = sv_split(&src, '=');
-    else
-        param = sv_split(&src, ' ');
+#define SET_NUM(fn) do { \
+    if (opt.len == 0) { \
+        printc(ACOLOR_RED, "Missing value.\n"); \
+        break; \
+    } \
+    int val = 0; \
+    if (!sv_to_int(opt, &val)) { \
+        printc(ACOLOR_RED, "Invalid value.\n"); \
+        break; \
+    } \
+    (fn)(vm, val); \
+} while (0)
 
+static void handle_set_command(CCalVM *vm, StringView input)
+{
+    bool has_eq = sv_find(input, '=') != SIZE_MAX;
+    StringView param = sv_split(&input, has_eq ? '=' : ' ');
     param = sv_trim(param);
+    StringView opt = sv_trim(input);
 
     if (param.len == 0)
     {
         printc(ACOLOR_RED, "Missin option.\n");
         printc(ACOLOR_CYAN, OPTIONS_REPL);
     }
-    else if (sv_equal(param, "ob") || sv_equal(param, "obase"))
+    else if (is_either(param, "ob", "obase"))
     {
-        if (!repl_set_numeric(src, &ctx->base, ctx)) return;
+        SET_NUM(ccal_set_obase);
         printc(AFMT_DIM, "Output base: ");
-        printc(ACOLOR_CYAN, "%lu\n", ctx->base);
+        printc(ACOLOR_CYAN, "%lu\n", ccal_get_obase(vm));
     }
-    else if (sv_equal(param, "ib") || sv_equal(param, "ibase"))
+    else if (is_either(param, "ib", "ibase"))
     {
-        if (!repl_set_numeric(src, &vm->base, ctx)) return;
+        SET_NUM(ccal_set_ibase);
         printc(AFMT_DIM, "Input base: ");
-        printc(ACOLOR_CYAN, "%lu\n", vm->base);
+        printc(ACOLOR_CYAN, "%lu\n", ccal_get_ibase(vm));
     }
-    else if (sv_equal(param, "pr") || sv_equal(param, "precision"))
+    else if (is_either(param, "tr", "truncate"))
     {
-        if (!repl_set_numeric(src, (unsigned long *)&ctx->prec, ctx)) return;
-        printc(AFMT_DIM, "Precision: ");
-        printc(ACOLOR_CYAN, "%lu\n", ctx->prec);
-    }
-    else if (sv_equal(param, "tr") || sv_equal(param, "truncate"))
-    {
-        if (!repl_set_numeric(src, &ctx->max_digits, ctx)) return;
+        SET_NUM(ccal_set_max_digits);
         printc(AFMT_DIM, "Truncate: ");
-        printc(ACOLOR_CYAN, "%lu\n", ctx->max_digits);
+        printc(ACOLOR_CYAN, "%lu\n", ccal_get_max_digits(vm));
     }
-    else if (sv_equal(param, "rat") || sv_equal(param, "rational"))
+    else if (is_either(param, "pr", "precision"))
     {
-        ctx->show_rational = !ctx->show_rational;
+        SET_NUM(ccal_set_prec);
+        printc(AFMT_DIM, "Precision: ");
+        printc(ACOLOR_CYAN, "%lu\n", ccal_get_prec(vm));
+    }
+    else if (is_either(param, "rat", "rational"))
+    {
+        ccal_set_show_rational(vm, !ccal_get_show_rational(vm));
         printc(AFMT_DIM, "Show rational: ");
-        printc(ACOLOR_CYAN, "%s\n", ctx->show_rational ? "on" : "off");
+        printc(ACOLOR_CYAN, "%s\n",  ccal_get_show_rational(vm) ? "on" : "off");
     }
-    else if (sv_equal(param, "fmt") || sv_equal(param, "format"))
+    else if (is_either(param, "fmt", "format"))
     {
-        if (sv_equal(src, "auto"))
+        if (sv_equal(opt, "auto"))
         {
-            ctx->fmt = FMT_AUTO;
+            ccal_set_format(vm, CCAL_FMT_AUTO);
             printc(AFMT_DIM, "Display format: ");
             printc(ACOLOR_CYAN, "auto\n");
         }
-        else if (sv_equal(src, "fixed"))
+        else if (sv_equal(opt, "fixed"))
         {
-            ctx->fmt = FMT_FIXED;
+            ccal_set_format(vm, CCAL_FMT_FIXED_POINT);
             printc(AFMT_DIM, "Display format: ");
             printc(ACOLOR_CYAN, "fixed\n");
         }
-        else if (sv_equal(src, "sci") || sv_equal(src, "scientific"))
+        else if (is_either(opt, "sci", "scientific"))
         {
-            ctx->fmt = FMT_SCI;
+            ccal_set_format(vm, CCAL_FMT_SCIENTIFIC);
             printc(AFMT_DIM, "Display format: ");
             printc(ACOLOR_CYAN, "scientific\n");
         }
@@ -141,41 +140,37 @@ static void repl_handle_set_command(VM *vm, RenderCtx *ctx, StringView src)
     }
 }
 
-// Handle REPL commands.
-bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
+static bool handle_command(CCalVM *vm, StringView input)
 {
-    if (ctx->use_color) printf(ACOLOR_CYAN);
+    printc(ACOLOR_CYAN, "");
 
-    src = sv_trim(src);
-    StringView cmd = sv_split(&src, ' ');
+    input = sv_trim(input);
+    StringView cmd = sv_split(&input, ' ');
 
-    bool should_continue = true;
+    bool exit = false;
 
-    if (sv_equal(cmd, "q") || sv_equal(cmd, "quit"))
+    if (is_either(cmd, "q", "quit"))
     {
-        should_continue = false;
+        exit = true;
     }
-    else if (sv_equal(cmd, "h") || sv_equal(cmd, "help"))
+    else if (is_either(cmd, "h", "help"))
     {
         printf(repl_help);
     }
-    else if (sv_equal(cmd, "e") || sv_equal(cmd, "env"))
+    else if (is_either(cmd, "e", "env"))
     {
-        String sb;
-        str_init(&sb);
-        vm_env_render(vm, &sb, ctx);
-        printf(SV_FMT, SV_ARG(SV(sb)));
-        str_free(&sb);
+        char *s = ccal_render_env(vm);
+        printf("%s", s);
+        free(s);
     }
-    else if (sv_equal(cmd, "c") || sv_equal(cmd, "clear"))
+    else if (is_either(cmd, "c", "clear"))
     {
-        vm_reset(vm);
-        source_reset(ctx->src);
+        ccal_reset(vm);
         printf("Cleared.\n");
     }
-    else if (sv_equal(cmd, "s") || sv_equal(cmd, "set"))
+    else if (is_either(cmd, "s", "set"))
     {
-        repl_handle_set_command(vm, ctx, src);
+        handle_set_command(vm, input);
     }
     else
     {
@@ -183,11 +178,8 @@ bool repl_handle_command(VM *vm, RenderCtx *ctx, StringView src)
         printc(ACOLOR_CYAN, repl_help);
     }
 
-    if (ctx->use_color) printf(AFMT_RESET);
-    return should_continue;
+    return exit;
 }
-
-static const Scope *env = NULL;
 
 // Generate a symbol completion from user-defined and builtin pools.
 char *symbol_generator(const char *text, int state)
@@ -207,7 +199,7 @@ char *symbol_generator(const char *text, int state)
         {
             da_reset(&list);
         }
-        matching_symbol_list(env, SV(text), &list);
+        // matching_symbol_list(env, SV(text), &list);
     }
 
     while (idx < list.len)
@@ -292,7 +284,23 @@ int clear_screen(int count, int key)
     return 0;
 }
 
-static bool read_logical_line(VM *vm, String *sb)
+int tab_handler(int count, int key)
+{
+    (void)count, (void)key;
+
+    StringView line = sv_trim(SV(rl_line_buffer));
+    if (line.len == 0)
+    {
+        rl_insert_text("    ");
+        return 0;
+    }
+    if (rl_last_func == tab_handler)
+        return rl_complete_internal('?');
+
+    return rl_complete_internal(TAB);
+}
+
+static bool read_logical_line(CCalVM *vm, String *sb)
 {
     const char *prompt = "ccal> ";
 
@@ -319,116 +327,86 @@ static bool read_logical_line(VM *vm, String *sb)
             sb->len--;
             continue;
         }
-        if (!vm_is_complete(vm, SV(sb)))
+        if (!ccal_expr_complete(vm, sb->data))
         {
             str_append(sb, "\n");
             continue;
         }
         break;
     }
+    str_append(sb, "\n");
     return true;
 }
 
-int tab_handler(int count, int key)
-{
-    (void)count, (void)key;
-
-    StringView line = sv_trim(SV(rl_line_buffer));
-    if (line.len == 0)
-    {
-        rl_insert_text("    ");
-        return 0;
-    }
-    if (rl_last_func == tab_handler)
-        return rl_complete_internal('?');
-
-    return rl_complete_internal(TAB);
-}
-
-// Start interactive REPL.
-void repl_start(VM *vm, RenderCtx *ctx)
+void repl_start(const CCalCtx *ctx)
 {
     rl_bind_key('\014', clear_screen);
     rl_bind_key('\t', tab_handler);
-
     rl_attempted_completion_function = repl_completion;
     rl_completer_word_break_characters = " :'`";
     rl_completer_quote_characters = "";
     rl_basic_quote_characters = "`";
 
-    Source src;
-    source_init(&src);
-    ctx->src = &src;
-    env = vm->scope;
+    CCalVM *vm = ccal_create();
+    ccal_set_ctx(vm, ctx);
 
     String sb;
     str_reserve(&sb, 256);
 
     for (;;)
     {
-        size_t offset = source_get_offset(&src);
-
         str_reset(&sb);
         if (!read_logical_line(vm, &sb))
-            goto exit;
-
-        if (sb.len == 0) continue;
-
-        str_append(&sb, "\n");
-        source_append_line(&src, SV(sb));
+            break;
 
         StringView input = SV(sb);
+        if (sv_trim(input).len == 0)
+            continue;
 
         if (sv_startswith(input, SV(":")))
         {
             sv_shift(&input, 1);
-            if (!repl_handle_command(vm, ctx, input))
+            if (handle_command(vm, input))
                 break;
 
             str_reset(&sb);
             continue;
         }
 
-        Value *result = vm_run_next(vm, input, offset);
+        CCalResult result = ccal_eval(vm, input.data);
 
-        str_reset(&sb);
-        value_render(result, &sb, ctx);
-        value_release(&result);
+        char *display = ccal_render(vm, result.value);
+        printf("%s\n", display);
 
-        printf(SV_FMT"\n", SV_ARG(SV(sb)));
+        free(display);
+        ccal_release(result.value);
     }
 
-exit:
-    str_free(&sb);
-    source_free(&src);
-
     printc(ACOLOR_CYAN, "Exit.\n");
+
+    str_free(&sb);
+    ccal_free(vm);
 }
 
-// Run/evaluate a single expression.
-bool run_eval(VM *vm, FILE *fdout, StringView input, RenderCtx *ctx)
+bool run_eval(FILE *fdout, StringView input, const CCalCtx *ctx)
 {
-    String out;
-    str_init(&out);
+    CCalVM *vm = ccal_create();
+    ccal_set_ctx(vm, ctx);
 
-    Source src;
-    source_init(&src);
-    ctx->src = &src;
+    char *src = sv_alloc_cstr(input);
+    CCalResult res = ccal_eval(vm, src);
+    free(src);
 
-    Value *result = vm_run(vm, input, &src);
-    value_render(result, &out, ctx);
-    fprintf(fdout, SV_FMT"\n", SV_ARG(SV(out)));
+    char *display = ccal_render(vm, res.value);
+    fprintf(fdout, "%s\n", display);
 
-    bool ok = !value_is_err(result);
-    value_release(&result);
+    free(display);
+    ccal_release(res.value);
 
-    str_free(&out);
-    source_free(&src);
-    return ok;
+    return res.ok;
 }
 
-// Run a script file.
-bool run_script(VM *vm, StringView path, RenderCtx *ctx)
+bool run_script(StringView path, const CCalCtx *ctx)
 {
     String buf;
     str_init(&buf);
@@ -449,7 +427,7 @@ bool run_script(VM *vm, StringView path, RenderCtx *ctx)
     }
     fclose(f);
 
-    bool ok = run_eval(vm, stdout, SV(buf), ctx);
+    bool ok = run_eval(stdout, SV(buf), ctx);
     str_free(&buf);
     return ok;
 }

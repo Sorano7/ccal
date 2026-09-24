@@ -1,5 +1,4 @@
 #include "value.h"
-#include "number.h"
 
 // Lookup of string names for value kind.
 const char *vk_to_str[] = {
@@ -7,9 +6,10 @@ const char *vk_to_str[] = {
     [VAL_ERROR]   = "error",
     [VAL_EXACT]   = "exact",
     [VAL_REAL]    = "real",
-    [VAL_BUILTIN] = "builtin",
+    [VAL_NATIVE]  = "lambda",
     [VAL_LAMBDA]  = "lambda",
 };
+
 
 static Value *value_new(ValueKind kind, Span span)
 {
@@ -41,19 +41,9 @@ Value *value_real(Span span, CR *n)
     return v;
 }
 
-Value *value_builtin(Span span, BuiltinKind kind, size_t arity)
-{
-    Value *v = value_new(VAL_BUILTIN, span);
-    v->as.builtin.kind = kind;
-    v->as.builtin.arity = arity;
-    v->as.builtin.len = 0;
-    v->as.builtin.args = calloc(1, arity * sizeof(Value *));
-    return v;
-}
-
 Value *value_bool(Span span, bool b)
 {
-    return value_builtin(span, b ? BUILTIN_TRUE : BUILTIN_FALSE, 2);
+    UNREACHABLE();
 }
 
 Value *value_lambda(const Expr *e, Scope *s)
@@ -61,6 +51,18 @@ Value *value_lambda(const Expr *e, Scope *s)
     Value *v = value_new(VAL_LAMBDA, e->span);
     v->as.lambda.expr = expr_clone(e);
     v->as.lambda.env = s;
+    return v;
+}
+
+Value *value_native(NativeFn fn, size_t arity, void *ud)
+{
+    Value *v = value_new(VAL_NATIVE, (Span){0});
+    v->as.native.argc = 0;
+    v->as.native.arity = arity;
+    if (arity > 0)
+        v->as.native.argv = malloc(arity * sizeof(Value *));
+    v->as.native.fn = fn;
+    v->as.native.ud = ud;
     return v;
 }
 
@@ -153,8 +155,8 @@ void value_release(Value **vp)
             scope_release(&v->as.lambda.env);
             break;
 
-        case VAL_BUILTIN:
-            free(v->as.builtin.args);
+        case VAL_NATIVE:
+            free(v->as.native.argv);
             break;
 
         case VAL_VOID:
@@ -170,17 +172,13 @@ void value_release(Value **vp)
 // Checks if a value is a bool value.
 bool value_is_bool(const Value *v)
 {
-    if (v->kind != VAL_BUILTIN)
-        return false;
-    return v->as.builtin.kind == BUILTIN_TRUE
-        || v->as.builtin.kind == BUILTIN_FALSE;
+    UNREACHABLE();
 }
 
 // Use a builtin boolean value as bool.
 bool value_to_bool(const Value *v)
 {
-    DEV_MUST(value_is_bool(v));
-    return v->as.builtin.kind == BUILTIN_TRUE;
+    UNREACHABLE();
 }
 
 bool value_equal(const Value *a, const Value *b)
@@ -195,24 +193,9 @@ bool value_equal(const Value *a, const Value *b)
         case VAL_ERROR:
             return sv_equal(a->as.error, b->as.error);
 
-        case VAL_BUILTIN:
-            if (a->as.builtin.kind != b->as.builtin.kind)
-                return false;
-            if (a->as.builtin.arity != b->as.builtin.arity)
-                return false;
-
-            Value **aargs = a->as.builtin.args;
-            Value **bargs = b->as.builtin.args;
-            size_t alen = a->as.builtin.len;
-            size_t blen = b->as.builtin.len;
-
-            if (alen != blen) return false;
-            for (size_t i = 0; i < alen; i++)
-            {
-                if (!value_equal(aargs[i], bargs[i]))
-                    return false;
-            }
-            return true;
+        case VAL_NATIVE:
+            UNREACHABLE();
+            break;
 
         case VAL_EXACT:
             return mpq_equal(a->as.exact, b->as.exact);
@@ -226,45 +209,6 @@ bool value_equal(const Value *a, const Value *b)
         default:
             UNREACHABLE();
     }
-}
-
-const char *builtin_to_str[] = {
-    [BUILTIN_NONE]  = "",
-    [BUILTIN_HOLE]  = "_",
-    [BUILTIN_TRUE]  = "true",
-    [BUILTIN_FALSE] = "false",
-    [BUILTIN_ANS]   = "ans",
-    [BUILTIN_PI]    = "pi",
-    [BUILTIN_E]     = "e",
-    [BUILTIN_MOD]   = "mod",
-    [BUILTIN_SQRT]  = "sqrt",
-    [BUILTIN_POW]   = "pow",
-    [BUILTIN_EXP]   = "exp",
-    [BUILTIN_LOG]   = "log",
-    [BUILTIN_LN]    = "ln",
-};
-
-// Get the builtin kind from an expression
-BuiltinKind builtin_kind(const Expr *e)
-{
-    if (e->kind != EXPR_IDENT)
-        return BUILTIN_NONE;
-
-    StringView name = SV(e->as.id);
-    if (sv_equal(name, "_"))     return BUILTIN_HOLE;
-    if (sv_equal(name, "true"))  return BUILTIN_TRUE;
-    if (sv_equal(name, "false")) return BUILTIN_FALSE;
-    if (sv_equal(name, "ans"))   return BUILTIN_ANS;
-    if (sv_equal(name, "pi"))    return BUILTIN_PI;
-    if (sv_equal(name, "e"))     return BUILTIN_E;
-    if (sv_equal(name, "mod"))   return BUILTIN_MOD;
-    if (sv_equal(name, "sqrt"))  return BUILTIN_SQRT;
-    if (sv_equal(name, "pow"))   return BUILTIN_POW;
-    if (sv_equal(name, "exp"))   return BUILTIN_EXP;
-    if (sv_equal(name, "log"))   return BUILTIN_LOG;
-    if (sv_equal(name, "ln"))    return BUILTIN_LN;
-
-    return BUILTIN_NONE;
 }
 
 static void symbol_free(Symbol *sym)
@@ -288,7 +232,7 @@ void scope_release(Scope **sp)
     if (s->refcount <= 0) return;
     if (--s->refcount > 0) return;
 
-    DA_FOR(s, i) symbol_free(&da_at(s, i));
+    DA_FOREACH(s, Symbol, sym) symbol_free(sym);
     da_free(s);
 
     if (s->parent)
@@ -334,13 +278,12 @@ void scope_set_symbol(Scope *scope, StringView id, Value *value)
     if (value)
     {
         new_value = value_retain(value);
-        DA_FOR(scope, i)
+        DA_FOREACH(scope, Symbol, sym)
         {
-            Symbol *existing = &da_at(scope, i);
-            if (sv_equal(existing->id, id))
+            if (sv_equal(sym->id, id))
             {
-                value_release(&existing->value);
-                existing->value = new_value;
+                value_release(&sym->value);
+                sym->value = new_value;
                 return;
             }
         }
@@ -355,7 +298,7 @@ void scope_set_symbol(Scope *scope, StringView id, Value *value)
 
 void scope_reset(Scope *s)
 {
-    DA_FOR(s, i) symbol_free(&da_at(s, i));
+    DA_FOREACH(s, Symbol, sym) symbol_free(sym);
     da_reset(s);
 }
 
@@ -364,13 +307,10 @@ Value *scope_get_symbol(Scope *scope, StringView id)
 {
     while (scope)
     {
-        DA_FOR(scope, i)
+        DA_FOREACH(scope, Symbol, sym)
         {
-            Symbol existing = da_at(scope, i);
-            if (sv_equal(existing.id, id))
-            {
-                return value_retain(existing.value);
-            }
+            if (sv_equal(sym->id, id))
+                return value_retain(sym->value);
         }
         scope = scope->parent;
     }
@@ -381,341 +321,10 @@ void matching_symbol_list(const Scope *scope, StringView name, SVList *sl)
 {
     if (scope)
     {
-        DA_FOR(scope, i)
+        DA_FOREACH(scope, Symbol, s)
         {
-            Symbol s = da_at(scope, i);
-            if (sv_startswith(SV(s.id), name))
-                da_append(sl, SV(s.id));
+            if (sv_startswith(SV(s->id), name))
+                da_append(sl, SV(s->id));
         }
     }
-
-    for (int i = 0; i < _BUILTIN_COUNT; i++)
-    {
-        StringView b = SV(builtin_to_str[i]);
-        if (sv_startswith(b, name))
-            da_append(sl, b);
-    }
-}
-
-void render_ctx_default(RenderCtx *ctx)
-{
-    ctx->base          = 10;
-    ctx->prec          = 50;
-    ctx->max_digits    = 10;
-    ctx->fmt           = FMT_AUTO;
-    ctx->show_rational = false;
-    ctx->use_color     = false;
-}
-
-#define appendc(c) do { \
-    if (ctx->use_color) str_appendf(sb, (c)); \
-} while (0)
-
-// Render an exact value.
-static void value_render_exact(Value *v, String *sb, RenderCtx *ctx)
-{
-    if (ctx->base >= 62)
-    {
-        appendc(ACOLOR_MAGENTA);
-        str_append(sb, "Output base too large");
-        appendc(AFMT_RESET);
-        return;
-    }
-
-    if (ctx->base != BASE_DEFAULT)
-    {
-        appendc(AFMT_DIM);
-        str_appendf(sb, "%lu#", ctx->base);
-        appendc(AFMT_RESET);
-    }
-
-    appendc(ACOLOR_YELLOW);
-
-    render_mpq_as_decimal(sb, v->as.exact, ctx->base, ctx->max_digits);
-
-    bool den_is_one = mpz_cmp_ui(mpq_denref(v->as.exact), 1) == 0;
-    if (ctx->show_rational && !den_is_one)
-    {
-        appendc(AFMT_RESET AFMT_DIM);
-
-        char *s = mpq_get_str(NULL, ctx->base, v->as.exact);
-        str_appendf(sb, " or %s", s);
-        free(s);
-    }
-
-    appendc(AFMT_RESET);
-}
-
-static void render_error_carets(Span span, String *sb, RenderCtx *ctx)
-{
-
-    for (size_t i = 0; i < span.from; i++)
-        str_append(sb, " ");
-
-    appendc(AFMT_BOLD ACOLOR_MAGENTA);
-
-    size_t len = span.to - span.from;
-    for (size_t i = 0; i < len; i++)
-        str_appendf(sb, "^");
-
-    str_appendf(sb, " ");
-    appendc(AFMT_RESET);
-}
-
-// Render an error value.
-static void value_render_error(Value *v, String *sb, RenderCtx *ctx)
-{
-    String src;
-    str_init(&src);
-
-    Span err_span = v->span;
-    bool show_src = ctx->src 
-        && source_get_line(ctx->src, v->span, &err_span, &src)
-        && src.len > 0;
-
-    bool msg_shown = false;
-    if (show_src)
-    {
-        StringView expr = SV(src);
-        size_t start = 0;
-        while (expr.len > 0)
-        {
-            StringView line = sv_split(&expr, '\n');
-            str_appendf(sb, SV_FMT"\n", SV_ARG(line));
-
-            size_t end = start + line.len + 1;
-            bool overlap = err_span.from <= start || end >= err_span.to;
-            if (!msg_shown && overlap)
-            {
-                Span carets = {
-                    err_span.from > start ? err_span.from-start : 0,
-                    err_span.to < end ? err_span.to-start : line.len,
-                };
-                render_error_carets(carets, sb, ctx);
-
-                if (end >= err_span.to)
-                {
-                    appendc(AFMT_BOLD ACOLOR_MAGENTA);
-                    str_append(sb, SV(v->as.error));
-                    appendc(AFMT_RESET);
-                    msg_shown = true;
-                }
-                str_append(sb, "\n");
-            }
-            start += line.len + 1;
-        }
-    }
-
-    if (!msg_shown)
-    {
-        appendc(AFMT_BOLD ACOLOR_MAGENTA);
-        str_append(sb, SV(v->as.error));
-        appendc(AFMT_RESET);
-    }
-}
-
-// Render a builtin value.
-static void value_render_builtin(Value *v, String *sb, RenderCtx *ctx)
-{
-    appendc(ACOLOR_YELLOW);
-
-    int applied = v->as.builtin.len;
-    int needs = v->as.builtin.arity - applied;
-
-    bool as_lambda = applied > 0;
-
-    if (as_lambda)
-    {
-        for (int i = 0; i < needs; i++)
-            str_appendf(sb, "('a%d: ", i+1);
-    }
-
-    str_appendf(sb, "'%s", builtin_to_str[v->as.builtin.kind]);
-
-    if (as_lambda)
-    {
-        for (int i = 0; i < applied; i++)
-        {
-            str_append(sb, " ");
-            value_render(v->as.builtin.args[i], sb, ctx);
-            appendc(ACOLOR_YELLOW);
-        }
-
-        for (int i = 0; i < needs; i++)
-            str_appendf(sb, " 'a%d", i+1);
-
-        for (int i = 0; i < needs; i++)
-            str_append(sb, ")");
-    }
-
-    appendc(AFMT_RESET);
-}
-
-#define RENDER_SUBST(e) render_with_subst(s, (e), params, sb, ctx)
-
-// Render an expression with identifiers substituted.
-static void render_with_subst(Scope *s, Expr *e, SVList *params, String *sb, RenderCtx *ctx)
-{
-    switch (e->kind)
-    {
-        case EXPR_LAMBDA:
-            str_appendf(sb, "(");
-            expr_render(e->as.lambda.param, sb);
-            if (e->as.lambda.param->kind == EXPR_IDENT)
-                da_append(params, SV(e->as.lambda.param->as.id));
-            str_appendf(sb, ": ");
-            RENDER_SUBST(e->as.lambda.body);
-            str_appendf(sb, ")");
-            break;
-
-        case EXPR_IDENT:
-            Value *existing = scope_get_symbol(s, SV(e->as.id));
-            if (!existing)
-            {
-                expr_render(e, sb);
-                break;
-            }
-
-            bool is_self = existing->kind == VAL_LAMBDA 
-                && existing->as.lambda.env == s;
-            bool is_param = svlist_contains(params, SV(e->as.id));
-
-            if (is_self || is_param)
-            {
-                expr_render(e, sb);
-                break;
-            }
-
-            value_render(existing, sb, ctx);
-            appendc(ACOLOR_YELLOW);
-            value_release(&existing);
-            break;
-
-        case EXPR_PREFIX:
-            str_appendf(sb, " %s", op_to_str[e->as.prefix.op]);
-            RENDER_SUBST(e->as.prefix.expr);
-            break;
-
-        case EXPR_INFIX:
-            RENDER_SUBST(e->as.infix.left);
-            if (e->as.infix.op == OP_APPLY)
-                str_appendf(sb, " ");
-            else
-                str_appendf(sb, " %s ", op_to_str[e->as.infix.op]);
-            RENDER_SUBST(e->as.infix.right);
-            break;
-
-        case EXPR_COND:
-            RENDER_SUBST(e->as.cond.if_);
-            str_appendf(sb, " ? ");
-            RENDER_SUBST(e->as.cond.then);
-            str_appendf(sb, " : ");
-            RENDER_SUBST(e->as.cond.else_);
-            break;
-
-        default:
-            expr_render(e, sb);
-            break;
-    }
-}
-
-// Render a lambda value;
-static void value_render_lambda(Value *v, String *sb, RenderCtx *ctx)
-{
-    appendc(ACOLOR_YELLOW);
-
-    SVList sl;
-    da_init(&sl);
-
-    Expr *e = v->as.lambda.expr;
-    if (e->as.lambda.param->kind == EXPR_IDENT)
-        da_append(&sl, SV(e->as.lambda.param->as.id));
-    render_with_subst(v->as.lambda.env, e, &sl, sb, ctx);
-
-    da_free(&sl);
-    appendc(AFMT_RESET);
-}
-
-// Compute and render a real value.
-static void value_render_real(Value *v, String *sb, RenderCtx *ctx)
-{
-    mpfi_t result;
-    mpfi_init2(result, ctx->prec);
-    cr_eval(v->as.real, ctx->prec, result);
-
-    appendc(AFMT_DIM);
-    str_append(sb, "~= ");
-    appendc(AFMT_RESET);
-
-    appendc(ACOLOR_YELLOW);
-    render_mpfi(sb, result, ctx->base, ctx->max_digits, ctx->fmt);
-    appendc(AFMT_RESET);
-
-    mpfi_clear(result);
-}
-
-// Render a value to the string builder.
-// The render may contain newlines but will not have a final newline.
-void value_render(Value *v, String *sb, RenderCtx *ctx)
-{
-    switch (v->kind)
-    {
-        case VAL_ERROR:   return value_render_error(v, sb, ctx);
-        case VAL_EXACT:   return value_render_exact(v, sb, ctx);
-        case VAL_REAL:    return value_render_real(v, sb, ctx);
-        case VAL_BUILTIN: return value_render_builtin(v, sb, ctx);
-        case VAL_LAMBDA:  return value_render_lambda(v, sb, ctx);
-        case VAL_VOID:    break;
-        default:          UNREACHABLE();
-    }
-}
-
-static void render_symbol_id(String *sb, StringView id, size_t max_len, RenderCtx *ctx)
-{
-    str_append(sb, "    ");
-
-    appendc(ACOLOR_CYAN);
-    str_append(sb, id);
-    for (size_t i = 0; i < max_len - id.len; i++)
-        str_append(sb, " ");
-
-    appendc(AFMT_RESET AFMT_DIM);
-    str_append(sb, " = ");
-    appendc(AFMT_RESET);
-}
-
-void scope_render(Scope *s, Value *ans, String *sb, RenderCtx *ctx)
-{
-    if (s->len == 0 && !ans)
-    {
-        appendc(ACOLOR_CYAN);
-        str_appendf(sb, "Empty.\n");
-        appendc(AFMT_RESET);
-        return;
-    }
-
-    size_t max_len = ans ? 3 : 0;
-    DA_FOR(s, i)
-    {
-        size_t len = da_at(s, i).id->len;
-        if (len > max_len) max_len = len;
-    }
-
-    if (ans)
-    {
-        appendc(AFMT_RESET);
-        render_symbol_id(sb, SV("ans"), max_len, ctx);
-        value_render(ans, sb, ctx);
-        str_append(sb, "\n");
-    }
-
-    DA_FOR(s, i)
-    {
-        Symbol sym = da_at(s, i);
-        render_symbol_id(sb,SV(sym.id), max_len, ctx);
-        value_render(sym.value, sb, ctx);
-        str_append(sb, "\n");
-    }
-
-    appendc(AFMT_RESET);
 }

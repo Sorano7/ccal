@@ -15,6 +15,8 @@
 // Default capacity for any dynamic array.
 #define DA_DEFAULT_CAP 64
 
+#define DA_DEFINE(name, T) typedef struct name { T *data; size_t len, cap; } name
+
 // Initializes and reserves capacity for a dynamic array.
 #define da_reserve(da, c) do { \
     (da)->len = 0; \
@@ -42,6 +44,7 @@
 #define da_last(da)  (da)->data[(da)->len-1]
 
 #define DA_FOR(da, i) for (size_t i = 0; i < (da)->len; i++)
+#define DA_FOREACH(da, T, it) for (T *it = (da)->data; it < (da)->data+(da)->len; it++)
 
 // Map a function accepting and returning type to each item in the dynamic array.
 #define da_map(da, type, f) do { \
@@ -105,12 +108,7 @@ typedef struct
 } StringView;
 
 // A mutable, owning string.
-typedef struct
-{
-    char *data;
-    size_t len;
-    size_t cap;
-} String;
+DA_DEFINE(String, char);
 
 StringView _sv_from_lit(const void *p, size_t n);
 StringView _sv_from_cstrp(const void *pp);
@@ -245,13 +243,7 @@ bool sv_endswith(StringView s, StringView suffix);
 bool sv_to_int(StringView s, int *out);
 
 // A dynamic array of string views.
-// Assuming static lifetime for the data.
-typedef struct
-{
-    StringView *data;
-    size_t len;
-    size_t cap;
-} SVList;
+DA_DEFINE(SVList, StringView);
 
 void svlist_join(SVList *sv, String *sb, StringView delim);
 bool svlist_contains(SVList *sl, StringView v);
@@ -297,12 +289,7 @@ typedef struct
 } CutLog;
 
 // A dynamic array of logs.
-typedef struct
-{
-    CutLog *data;
-    size_t len;
-    size_t cap;
-} CutLogList;
+DA_DEFINE(CutLogList, CutLog);
 
 // Append a log from within a test case.
 void _cut_log_append(CutLogList *logs, CutLog log, const char *fmt, ...);
@@ -547,12 +534,7 @@ typedef struct
     CutFlagKind kind;
 } CutFlag;
 
-typedef struct
-{
-    CutFlag *data;
-    size_t len;
-    size_t cap;
-} CutFlagList;
+DA_DEFINE(CutFlagList, CutFlag);
 
 typedef struct
 {

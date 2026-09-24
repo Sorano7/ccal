@@ -1,7 +1,8 @@
 #ifndef REPL_H
 #define REPL_H
 
-#include "vm.h"
+#include "cut.h"
+#include "ccal/ccal.h"
 
 #define DESC_FORMAT    "set the display format for numeric values"
 #define DESC_AUTO      "fixed-point by default, scientific for large exponent"
@@ -32,8 +33,8 @@
 extern const char cli_help[];
 extern const char repl_help[];
 
-void repl_start(VM *vm, RenderCtx *ctx);
-bool run_script(VM *vm, StringView path, RenderCtx *ctx);
-bool run_eval(VM *vm, FILE *fdout, StringView input, RenderCtx *ctx);
+void repl_start(const CCalCtx *ctx);
+bool run_script(StringView path, const CCalCtx *ctx);
+bool run_eval(FILE *fdout, StringView input, const CCalCtx *ctx);
 
 #endif

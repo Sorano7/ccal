@@ -188,12 +188,11 @@ void render_mpq_as_decimal(String *sb, const mpq_t n, int base, size_t max_digit
 
             // Search whether remainder is seen
             size_t found = SIZE_MAX;
-            DA_FOR(&seen, i)
+            DA_FOREACH(&seen, Rem, r)
             {
-                Rem r = da_at(&seen, i);
-                if (mpz_cmp(r.rem, rem) == 0)
+                if (mpz_cmp(r->rem, rem) == 0)
                 {
-                    found = r.pos;
+                    found = r->pos;
                     break;
                 }
             }
@@ -221,7 +220,7 @@ void render_mpq_as_decimal(String *sb, const mpq_t n, int base, size_t max_digit
             pos++;
         }
 
-        DA_FOR(&seen, i) mpz_clear(da_at(&seen, i).rem);
+        DA_FOREACH(&seen, Rem, r) mpz_clear(r->rem);
         da_free(&seen);
 
         if (repeat_start != SIZE_MAX)

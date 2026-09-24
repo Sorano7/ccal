@@ -9,7 +9,6 @@ typedef struct CCalVM
 {
     VM vm;
     Source src;
-    RenderCtx ctx;
 } CCalVM;
 
 typedef struct CCalValue
@@ -27,8 +26,7 @@ CCalVM *ccal_create(void)
     CCalVM *vm = malloc(sizeof(CCalVM));
     vm_init(&vm->vm);
     source_init(&vm->src);
-    render_ctx_default(&vm->ctx);
-    vm->ctx.src = &vm->src;
+    vm->vm.ctx.src = &vm->src;
     return vm;
 }
 
@@ -43,48 +41,51 @@ void ccal_reset(CCalVM *vm)
 {
     vm_reset(&vm->vm);
     source_reset(&vm->src);
-    render_ctx_default(&vm->ctx);
 }
 
-void ccal_set_ctx(CCalVM *vm, const CCalCtx *ctx)
+CCAL_SETTER(const CCalCtx *, ctx)
 {
     ccal_set_ibase(vm, ctx->ibase);
     ccal_set_obase(vm, ctx->obase);
     ccal_set_max_digits(vm, ctx->max_digits);
-    ccal_set_precision(vm, ctx->precision);
-    ccal_set_render_fmt(vm, ctx->render_fmt);
+    ccal_set_prec(vm, ctx->precision);
+    ccal_set_format(vm, ctx->render_fmt);
+    ccal_set_show_color(vm, ctx->show_color);
+    ccal_set_show_rational(vm, ctx->show_rational);
 }
 
-void ccal_set_ibase(CCalVM *vm, unsigned long ibase)
-{
-    if (ibase > 1) vm->vm.base = ibase;
-}
+CCAL_SETTER(unsigned long, ibase)      { if (ibase > 1) vm->vm.ctx.ibase = ibase; }
+CCAL_SETTER(unsigned long, obase)      { if (obase > 1) vm->vm.ctx.obase = obase; }
+CCAL_SETTER(unsigned long, max_digits) { vm->vm.ctx.max_digits = max_digits; }
+CCAL_SETTER(mp_prec_t, prec)           { vm->vm.ctx.prec = prec; }
+CCAL_SETTER(bool, show_color)          { vm->vm.ctx.use_color = show_color; }
+CCAL_SETTER(bool, show_rational)       { vm->vm.ctx.show_rational = show_rational; }
 
-void ccal_set_obase(CCalVM *vm, unsigned long obase)
+CCAL_SETTER(CCalRenderFmt, format)
 {
-    if (obase > 1) vm->ctx.base = obase;
-}
-
-void ccal_set_max_digits(CCalVM *vm, unsigned long max_digits)
-{
-    vm->ctx.max_digits = max_digits;
-}
-
-void ccal_set_precision(CCalVM *vm, mp_prec_t prec)
-{
-    vm->ctx.prec = prec;
-}
-
-void ccal_set_render_fmt(CCalVM *vm, CCalRenderFmt fmt)
-{
-    switch (fmt)
+    switch (format)
     {
-        case CCAL_FMT_RATIONAL:
-        case CCAL_FMT_AUTO:        vm->ctx.fmt = FMT_AUTO;  break;
-        case CCAL_FMT_FIXED_POINT: vm->ctx.fmt = FMT_FIXED; break;
-        case CCAL_FMT_SCIENTIFIC:  vm->ctx.fmt = FMT_SCI;   break;
+        case CCAL_FMT_AUTO:        vm->vm.ctx.fmt = FMT_AUTO;  break;
+        case CCAL_FMT_FIXED_POINT: vm->vm.ctx.fmt = FMT_FIXED; break;
+        case CCAL_FMT_SCIENTIFIC:  vm->vm.ctx.fmt = FMT_SCI;   break;
     }
-    vm->ctx.show_rational = fmt == CCAL_FMT_RATIONAL;
+}
+
+CCAL_GETTER(unsigned long, ibase)      { return vm->vm.ctx.ibase; }
+CCAL_GETTER(unsigned long, obase)      { return vm->vm.ctx.obase; }
+CCAL_GETTER(unsigned long, max_digits) { return vm->vm.ctx.max_digits; }
+CCAL_GETTER(mp_prec_t, prec)           { return vm->vm.ctx.prec; }
+CCAL_GETTER(bool, show_color)        { return vm->vm.ctx.use_color; }
+CCAL_GETTER(bool, show_rational)       { return vm->vm.ctx.show_rational; }
+
+CCAL_GETTER(CCalRenderFmt, format)
+{
+    switch (vm->vm.ctx.fmt)
+    {
+        case FMT_AUTO:  return CCAL_FMT_AUTO;
+        case FMT_FIXED: return CCAL_FMT_FIXED_POINT;
+        case FMT_SCI:   return CCAL_FMT_SCIENTIFIC;
+    }
 }
 
 
@@ -100,7 +101,7 @@ CCalValueKind ccal_get_kind(const CCalValue *val)
         case VAL_EXACT:   return CCAL_VAL_EXACT;
         case VAL_REAL:    return CCAL_VAL_REAL;
         case VAL_ERROR:   return CCAL_VAL_ERROR;
-        case VAL_BUILTIN:
+        case VAL_NATIVE:
         case VAL_LAMBDA:  return CCAL_VAL_LAMBDA;
         default:          UNREACHABLE();
     }
@@ -212,7 +213,17 @@ char *ccal_render(CCalVM *vm, const CCalValue *val)
     String sb;
     str_init(&sb);
 
-    value_render(val->value, &sb, &vm->ctx);
+    vm_value_render(&vm->vm, val->value, &sb);
+
+    return sb.data;
+}
+
+char *ccal_render_env(CCalVM *vm)
+{
+    String sb;
+    str_init(&sb);
+
+    vm_env_render(&vm->vm, &sb);
 
     return sb.data;
 }

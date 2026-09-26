@@ -15,7 +15,7 @@ void core_config(CutUnit *u)
     cut_unit_includes(u, "../shared", "include", "src/include");
     cut_unit_flags(u, "-g", "-Wall", "-Wextra", "-Wno-override-init");
 
-    cut_unit_flags(u, "-static");
+    cut_init_static_link(u, true);
     cut_unit_libs(u, "mpfi", "mpfr", "gmp", "m");
 }
 
@@ -37,7 +37,7 @@ int main(int argc, char **argv)
 
     CutUnit lib;
     cut_unit_init(&lib, "lib", CUT_UNIT_LIB_STATIC);
-    cut_unit_lib_name(&lib, "ccal");
+    cut_unit_out_name(&lib, "ccal");
     core_config(&lib);
 
     CutUnit test;

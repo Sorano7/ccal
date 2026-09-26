@@ -16,9 +16,7 @@ int main(int argc, char **argv)
     SVList args;
     da_init(&args);
 
-    cut_fp_add_command(&fp, SV("run"));
-    cut_fp_add_command(&fp, SV("eval"));
-    cut_fp_add_command(&fp, SV("help"));
+    cut_fp_add_commands(&fp, "help", "run", "eval");
 
     cut_fp_add_flag(&fp, (int *)(&ctx.obase),      SV("obase"),     .short_name='o');
     cut_fp_add_flag(&fp, (int *)(&ctx.ibase),      SV("ibase"),     .short_name='i');
@@ -27,7 +25,14 @@ int main(int argc, char **argv)
     cut_fp_add_flag(&fp, &fmt,                     SV("format"),    .short_name='f');
     cut_fp_add_flag(&fp, &ctx.show_rational,       SV("rational"),  .short_name='r');
 
-    cut_fp_parse(&fp, argc, argv, &args);
+    CutFPResult res = cut_fp_parse(&fp, argc, argv, &args);
+    if (res.status != CUT_FP_OK)
+    {
+        fprintf(stderr, "Error parsing flags: "SV_FMT"\n", SV_ARG(SV(res.msg)));
+        return 1;
+    }
+    StringView cmd = fp.subcmd;
+    cut_fp_free(&fp);
 
     if      (sv_equal(fmt, "auto"))  ctx.render_fmt = CCAL_FMT_AUTO;
     else if (sv_equal(fmt, "fixed")) ctx.render_fmt = CCAL_FMT_FIXED_POINT;
@@ -40,7 +45,6 @@ int main(int argc, char **argv)
 
     bool ok = true;
 
-    StringView cmd = cut_fp_get_command(&fp, argc, argv);
     if (sv_equal(cmd, "help"))
     {
         printf("%s", cli_help);
@@ -80,7 +84,6 @@ int main(int argc, char **argv)
         repl_start(&ctx);
     }
 
-    cut_fp_free(&fp);
     da_free(&args);
     return ok ? 0 : 1;
 }

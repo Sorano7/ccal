@@ -239,6 +239,9 @@ bool sv_startswith(StringView s, StringView prefix);
 // Check if the string view ends with a suffix.
 bool sv_endswith(StringView s, StringView suffix);
 
+// Check if the string view contains the sub string.
+bool sv_contains(StringView s, StringView sub);
+
 // Convert a string view to int.
 bool sv_to_int(StringView s, int *out);
 
@@ -446,7 +449,7 @@ typedef enum
 typedef struct
 {
     StringView name;
-    StringView libname;
+    StringView out_name;
     CutUnitKind kind;
 
     SVList sources;
@@ -455,6 +458,7 @@ typedef struct
     SVList defines;
     SVList libs;
     SVList lib_dirs;
+    bool link_static;
 } CutUnit;
 
 // Initializes a unit.
@@ -470,8 +474,12 @@ void _cut_make_sv_list(SVList *sl, ...);
 #define cut_unit_libs(unit, ...)     _cut_make_sv_list(&(unit)->libs,     __VA_OPT__(__VA_ARGS__,) NULL);
 #define cut_unit_lib_dirs(unit, ...) _cut_make_sv_list(&(unit)->lib_dirs, __VA_OPT__(__VA_ARGS__,) NULL);
 
-#define cut_unit_lib_name(unit, name) do { \
-    (unit)->libname = SV(name); \
+#define cut_unit_out_name(unit, name) do { \
+    (unit)->out_name = SV(name); \
+} while (0)
+
+#define cut_init_static_link(unit, enabled) do { \
+    (unit)->link_static = (enabled); \
 } while (0)
 
 // Options for builder
@@ -538,6 +546,7 @@ DA_DEFINE(CutFlagList, CutFlag);
 
 typedef struct
 {
+    StringView subcmd;
     SVList commands;
     CutFlagList optional;
 } CutFlagParser;
@@ -558,7 +567,10 @@ void cut_fp_reset(CutFlagParser *fp);
 void cut_fp_free(CutFlagParser *fp);
 
 // Add a command to the flag parser.
-void cut_fp_add_command(CutFlagParser *fp, StringView cmd);
+void cut_fp_add_command(CutFlagParser *fp, const char *cmd);
+void _cut_fp_add_commands(CutFlagParser *fp, const char *first, ...);
+#define cut_fp_add_commands(fp, first, ...) \
+    _cut_fp_add_commands((fp), (first) __VA_OPT__(,) __VA_ARGS__, NULL)
 
 // Add an optional flag to the flag parser.
 void cut_fp_add_flag_opt(CutFlagParser *fp, CutFlagKind kind, 
@@ -569,7 +581,7 @@ void cut_fp_add_flag_opt(CutFlagParser *fp, CutFlagKind kind,
         bool *:       CUT_FLAG_BOOL, \
         int *:        CUT_FLAG_INT, \
         StringView *: CUT_FLAG_STR), \
-    (data), (name), (CutFlagOpt){ \
+    (data), name, (CutFlagOpt){ \
         .desc=SV(""), .short_name=0, \
     __VA_ARGS__})
 
@@ -585,8 +597,6 @@ typedef struct
     String *msg;
     CutFPStatus status;
 } CutFPResult;
-
-StringView cut_fp_get_command(CutFlagParser *fp, int argc, char **argv);
 
 CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 
@@ -609,26 +619,20 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 #include <sys/types.h>
 
 #ifdef _WIN32
+    #include <io.h>
+    #include <windows.h>
+    #include <direct.h>
 
-#include <io.h>
-#include <windows.h>
-#include <direct.h>
-
-#define isatty     _isatty
-#define fileno     _fileno
-#define stat       _stat
-#define fstat      _fstat
-
-#define makedir(x) _mkdir(x)
-
+    #define isatty     _isatty
+    #define fileno     _fileno
+    #define stat       _stat
+    #define fstat      _fstat
+    #define makedir(x) _mkdir(x)
 #else
-
-#include <unistd.h>
-#include <limits.h>
-#include <ctype.h>
-
-#define makedir(x) mkdir(x, 0755)
-
+    #include <unistd.h>
+    #include <limits.h>
+    #include <ctype.h>
+    #define makedir(x) mkdir(x, 0755)
 #endif // _WIN32
 
 
@@ -901,6 +905,24 @@ bool sv_endswith(StringView s, StringView suffix)
     return sv_equal(s, suffix);
 }
 
+// Check if the string view contains the sub string.
+bool sv_contains(StringView s, StringView sub)
+{
+    if (sub.len > s.len) return false;
+
+    for (size_t i = 0; i < s.len; i++)
+    {
+        size_t j = 0;
+        for (; j < sub.len; j++)
+        {
+            if (s.data[i+j] != sub.data[j])
+                break;
+        }
+        if (j == sub.len) return true;
+    }
+    return false;
+}
+
 // Convert a string view to int.
 bool sv_to_int(StringView s, int *out)
 {
@@ -972,9 +994,11 @@ static void command_format(SVList *sl, String *sb, StringView prefix)
  ************************************************/
 
 #ifdef _WIN32
-#define PATH_SEP "\\"
+    #define PATH_SEP "\\"
+    #define PATH_SEP_C '\\'
 #else
-#define PATH_SEP "/"
+    #define PATH_SEP "/"
+    #define PATH_SEP_C '/'
 #endif
 
 // Get the mtime of a file, return -1 if error.
@@ -1011,14 +1035,43 @@ static MkdirResult mkdir_if_not_exist(StringView path)
     return MKDIR_FAILED;
 }
 
+static inline bool shell_needs_quoting(StringView arg)
+{
+    if (sv_contains(arg, SV(" ")))  return true;
+    if (sv_contains(arg, SV("\\"))) return true;
+    if (sv_contains(arg, SV("\n"))) return true;
+    if (sv_contains(arg, SV("\t"))) return true;
+    if (sv_contains(arg, SV("*")))  return true;
+    if (sv_contains(arg, SV("?")))  return true;
+    if (sv_contains(arg, SV("[")))  return true;
+    if (sv_contains(arg, SV("]")))  return true;
+    if (sv_contains(arg, SV("$")))  return true;
+    if (sv_contains(arg, SV("`")))  return true;
+    if (sv_contains(arg, SV("~")))  return true;
+
+    return false;
+}
+
+static inline void append_shell_safe(String *sb, StringView arg)
+{
+    bool quote = shell_needs_quoting(arg);
+    if (quote) str_append(sb, "\"");
+    str_append(sb, arg);
+    if (quote) str_append(sb, "\"");
+}
+
 // Append the name of the executable to the string builder.
 static void append_exe_name(String *sb, StringView base)
 {
-    str_append_view(sb, base);
-
+    String tmp;
+    str_init(&tmp);
+    str_append(&tmp, base);
 #ifdef _WIN32
-    str_appendf(sb, ".exe");
+    str_appendf(&tmp, ".exe");
 #endif
+
+    append_shell_safe(sb, SV(tmp));
+    str_free(&tmp);
 }
 
 // Run a external command.
@@ -1043,25 +1096,15 @@ static void remove_path(StringView path)
 #else
     str_appendf(&cmd, "rm -rf ");
 #endif
-    str_appendf(&cmd, "\""SV_FMT"\"", SV_ARG(path));
+
+    if (sv_contains(path, SV("*")) || sv_contains(path, SV("~")))
+        str_append(&cmd, path);
+    else
+        append_shell_safe(&cmd, path);
     exec_command(SV(cmd));
     str_free(&cmd);
 }
 
-static StringView get_base_name(StringView file)
-{
-    StringView base = sv_split(&file, '.');
-
-    size_t next_fwd = sv_find(base, '/');
-    char delim = next_fwd == SIZE_MAX ? '\\' : '/';
-
-    for (;;)
-    {
-        StringView next = sv_split(&base, delim);
-        if (base.len == 0)
-            return next;
-    }
-}
 
 /************************************************
  * Logging
@@ -1308,6 +1351,7 @@ void cut_unit_init(CutUnit *unit, const char *name, CutUnitKind kind)
     memset(unit, 0, sizeof(*unit));
 
     unit->name = SV(name);
+    unit->out_name = SV(name);
     unit->kind = kind;
 }
 
@@ -1354,52 +1398,58 @@ static void old_script_exe_name(String *sb)
     str_appendf(sb, ".old");
 }
 
-static void cmd_add_objs(CutUnit *unit, String *sb)
+static inline void cmd_add_unique_name(StringView path, StringView ext, String *sb)
 {
-    DA_FOR(&unit->sources, i)
+    StringView base = sv_split(&path, '.');
+    str_append(sb, cut_builder.build_dir);
+    str_append(sb, PATH_SEP);
+
+    while (base.len > 0)
     {
-        StringView src = da_at(&unit->sources, i);
-        StringView base = get_base_name(src);
-        str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.build_dir));
-        str_appendf(sb, SV_FMT".o ", SV_ARG(base));
+        str_append(sb, sv_split(&base, PATH_SEP_C));
+        if (base.len > 0)
+            str_append(sb, "_");
+    }
+    str_append(sb, ext);
+}
+
+static inline void cmd_add_objs(CutUnit *unit, String *sb)
+{
+    DA_FOREACH(&unit->sources, StringView, src)
+    {
+        cmd_add_unique_name(*src, SV(".o"), sb);
+        str_append(sb, " ");
     }
 }
 
-static void cmd_add_cc(String *sb)
+static inline void cmd_add_cc(String *sb)
 {
     str_appendf(sb, SV_FMT" ", SV_ARG(cut_builder.cc));
 }
 
-static void cmd_add_srcs(CutUnit *unit, String *sb)
+static inline void cmd_add_srcs(CutUnit *unit, String *sb)
 {
     command_format(&unit->sources, sb, SV(""));
 }
 
-static void cmd_add_cflags(CutUnit *unit, String *sb)
+static inline void cmd_add_includes(CutUnit *unit, String *sb)
 {
     command_format(&unit->includes, sb, SV("-I"));
+}
+
+static inline void cmd_add_cflags(CutUnit *unit, String *sb)
+{
     command_format(&unit->flags, sb, SV(""));
     command_format(&unit->defines, sb, SV("-D"));
 }
 
-static void cmd_add_links(CutUnit *unit, String *sb)
+static inline void cmd_add_links(CutUnit *unit, String *sb)
 {
     command_format(&unit->lib_dirs, sb, SV("-L"));
     command_format(&unit->libs, sb, SV("-l"));
 }
 
-// Generate the build command for a unit.
-static void cmd_build_exe(CutUnit *unit, String *sb)
-{
-    cmd_add_cc(sb);
-    cmd_add_srcs(unit, sb);
-    cmd_add_cflags(unit, sb);
-    cmd_add_links(unit, sb);
-    str_appendf(sb, "-o "SV_FMT PATH_SEP SV_FMT" ", 
-            SV_ARG(cut_builder.build_dir), SV_ARG(unit->name));
-}
-
-static void cmd_build_obj(CutUnit *unit, StringView src, bool pic, String *sb)
+static inline void cmd_build_obj(CutUnit *unit, StringView src, bool pic, String *sb)
 {
     cmd_add_cc(sb);
     str_append(sb, "-c ");
@@ -1407,31 +1457,53 @@ static void cmd_build_obj(CutUnit *unit, StringView src, bool pic, String *sb)
 
     str_appendf(sb, SV_FMT" ", SV_ARG(src));
 
+    cmd_add_includes(unit, sb);
     cmd_add_cflags(unit, sb);
 
-    StringView base = get_base_name(src);
-    str_appendf(sb, "-o "SV_FMT PATH_SEP SV_FMT".o ", 
-            SV_ARG(cut_builder.build_dir), SV_ARG(base));
-
-    exec_command(SV(sb));
+    str_append(sb, "-o ");
+    cmd_add_unique_name(src, SV(".o"), sb);
 }
 
-static void cmd_build_shared(CutUnit *unit, String *sb)
+static inline void cmd_output(CutUnit *unit, String *sb)
+{
+    bool lib_shared = unit->kind == CUT_UNIT_LIB_SHARED;
+    bool lib_static = unit->kind == CUT_UNIT_LIB_STATIC;
+    bool is_lib = lib_shared || lib_static;
+
+    StringView out_dir = is_lib ? cut_builder.lib_dir : cut_builder.build_dir;
+    str_appendf(sb, "-o "SV_FMT PATH_SEP, SV_ARG(out_dir));
+
+    StringView out_name = unit->out_name;
+    if (is_lib) str_appendf(sb, "lib");
+    str_append(sb, out_name);
+    if (is_lib) str_appendf(sb, lib_shared ? ".so" : ".a");
+    str_append(sb, " ");
+}
+
+static inline void cmd_link_exe(CutUnit *unit, String *sb)
+{
+    cmd_add_cc(sb);
+    cmd_add_objs(unit, sb);
+    cmd_add_cflags(unit, sb);
+    if (unit->link_static)
+        str_append(sb, "-static ");
+    cmd_add_links(unit, sb);
+    cmd_output(unit, sb);
+}
+
+static inline void cmd_link_shared(CutUnit *unit, String *sb)
 {
     cmd_add_cc(sb);
     str_append(sb, "-shared ");
     cmd_add_objs(unit, sb);
-    StringView libname = unit->libname.len == 0 ? unit->name : unit->libname;
-    str_appendf(sb, "-o "SV_FMT PATH_SEP, SV_ARG(cut_builder.lib_dir));
-    str_appendf(sb, "lib"SV_FMT".so ", SV_ARG(libname));
+    cmd_output(unit, sb);
 }
 
-static void cmd_build_static(CutUnit *unit, String *sb)
+static inline void cmd_link_static(CutUnit *unit, String *sb)
 {
     str_append(sb, "ar rcs ");
     str_appendf(sb, SV_FMT PATH_SEP, SV_ARG(cut_builder.lib_dir));
-    StringView libname = unit->libname.len == 0 ? unit->name : unit->libname;
-    str_appendf(sb, "lib"SV_FMT".a ", SV_ARG(libname));
+    cmd_output(unit, sb);
     cmd_add_objs(unit, sb);
 }
 
@@ -1447,7 +1519,7 @@ static void cmd_run_exe(StringView name, StringView parent, String *sb)
 }
 
 // Rebuild the build script.
-static void cut_rebuild(size_t argc, StringView *argv)
+static void cut_rebuild(StringView subcmd, SVList *args)
 {
     String sb;
     str_init(&sb);
@@ -1480,8 +1552,12 @@ static void cut_rebuild(size_t argc, StringView *argv)
 
     str_reset(&sb);
     cmd_run_exe(cut_builder.script_name, SV(""), &sb);
-    for (size_t i = 1; i < argc; i++)
-        str_appendf(&sb, SV_FMT" ", SV_ARG(argv[i]));
+    str_appendf(&sb, SV_FMT" ", SV_ARG(subcmd));
+    DA_FOREACH(args, StringView, arg)
+    {
+        if (!sv_equal(*arg, "--rebuild") && !sv_equal(*arg, "-r"))
+            str_appendf(&sb, SV_FMT" ", SV_ARG(*arg));
+    }
 
     exec_command(SV(sb));
 
@@ -1512,9 +1588,6 @@ void cut_build_init_opt(StringView file, CutBuilderOpt opt)
     cut_builder.lib_dir = opt.lib_dir;
     cut_builder.script_name = opt.script_name;
     cut_builder.file = file;
-
-    cut_create_dir(opt.build_dir);
-    cut_create_dir(opt.lib_dir);
 }
 
 // Define all units for the build.
@@ -1558,27 +1631,6 @@ static CutUnit *cut_build_find_unit(StringView name)
     return NULL;
 }
 
-static void cut_build_exe(CutUnit *exe, bool run, StringView *args, int count)
-{
-    String cmd;
-    str_init(&cmd);
-
-    cmd_build_exe(exe, &cmd);
-    exec_command(SV(cmd));
-
-    if (run)
-    {
-        str_reset(&cmd);
-        cmd_run_exe(exe->name, cut_builder.build_dir, &cmd);
-        for (int i = 0; i < count; i++)
-            str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(args[i]));
-
-        exec_command(SV(cmd));
-    }
-
-    str_free(&cmd);
-}
-
 static void cut_build_objs(CutUnit *unit)
 {
     String cmd;
@@ -1595,6 +1647,29 @@ static void cut_build_objs(CutUnit *unit)
     str_free(&cmd);
 }
 
+static void cut_build_exe(CutUnit *exe, bool run, SVList *args)
+{
+    String cmd;
+    str_init(&cmd);
+
+    cut_build_objs(exe);
+
+    cmd_link_exe(exe, &cmd);
+    exec_command(SV(cmd));
+
+    if (run)
+    {
+        str_reset(&cmd);
+        cmd_run_exe(exe->out_name, cut_builder.build_dir, &cmd);
+        for (size_t i = 1; i < args->len; i++)
+            str_appendf(&cmd, "\""SV_FMT"\" ", SV_ARG(da_at(args, i)));
+
+        exec_command(SV(cmd));
+    }
+
+    str_free(&cmd);
+}
+
 static void cut_build_lib(CutUnit *lib)
 {
     String cmd;
@@ -1603,9 +1678,9 @@ static void cut_build_lib(CutUnit *lib)
     cut_build_objs(lib);
 
     if (lib->kind == CUT_UNIT_LIB_SHARED)
-        cmd_build_shared(lib, &cmd);
+        cmd_link_shared(lib, &cmd);
     else
-        cmd_build_static(lib, &cmd);
+        cmd_link_static(lib, &cmd);
     exec_command(SV(cmd));
 
     str_free(&cmd);
@@ -1629,61 +1704,81 @@ static void cut_build_clean(void)
 // Run build.
 int cut_build_run(int argc, char **argv)
 {
-    StringView args[argc];
-    for (int i = 0; i < argc; i++)
-        args[i] = SV(argv[i]);
+    CutFlagParser fp;
+    cut_fp_init(&fp);
 
-    if (should_rebuild(cut_builder.file, cut_builder.script_name))
-        cut_rebuild(argc, args);
+    bool rebuild = should_rebuild(cut_builder.file, cut_builder.script_name);
+    cut_fp_add_flag(&fp, &rebuild, SV("rebuild"), .short_name='r');
 
-    StringView subcmd = args[1];
+    cut_fp_add_commands(&fp, "help", "run", "build", "clean");
 
-    if (argc == 2 && sv_equal(subcmd, "clean"))
+    SVList args;
+    da_init(&args);
+
+    CutFPResult res = cut_fp_parse(&fp, argc, argv, &args);
+    StringView subcmd = fp.subcmd;
+    if (res.status != CUT_FP_OK)
+        DEV_FATAL("Error parsing flags: "SV_FMT"\n", SV_ARG(SV(res.msg)));
+    cut_fp_free(&fp);
+
+    if (rebuild) 
+    {
+        cut_rebuild(subcmd, &args);
+        UNREACHABLE();
+    }
+
+    bool ok = true;
+    if (sv_equal(subcmd, "clean"))
     {
         cut_build_clean();
+        goto done;
     }
-    else if (argc >= 3 && sv_equal(subcmd, "rebuild"))
-    {
-        cut_rebuild(argc-1, args+1);
-    }
-    else if (argc >= 3)
-    {
-        bool build = sv_equal(subcmd, "build");
-        bool run = sv_equal(subcmd, "run");
 
-        if (build || run)
+    bool build = sv_equal(subcmd, "build");
+    bool run = sv_equal(subcmd, "run");
+    if (build || run)
+    {
+        if (args.len == 0)
+            DEV_FATAL("Expected unit name.");
+
+        StringView unit_name = args.data[0];
+        CutUnit *unit = cut_build_find_unit(unit_name);
+        if (!unit) 
+            DEV_FATAL("Unit '"SV_FMT"' does not exist.", SV_ARG(unit_name));
+
+        cut_create_dir(cut_builder.build_dir);
+        switch (unit->kind)
         {
-            CutUnit *unit = NULL;
-            unit = cut_build_find_unit(args[2]);
-            if (!unit) 
-                DEV_FATAL("Unit '"SV_FMT"' does not exist.", SV_ARG(args[2]));
+            case CUT_UNIT_EXE:
+                cut_build_exe(unit, run, &args);
+                break;
 
-            switch (unit->kind)
-            {
-                case CUT_UNIT_EXE:
-                    cut_build_exe(unit, run, args+3, argc-3);
-                    break;
+            case CUT_UNIT_LIB_STATIC:
+            case CUT_UNIT_LIB_SHARED:
+                if (run)
+                    DEV_FATAL("Cannot run library unit. Did you mean 'build'?");
 
-                case CUT_UNIT_LIB_STATIC:
-                case CUT_UNIT_LIB_SHARED:
-                    cut_build_lib(unit);
-                    break;
-            }
+                cut_create_dir(cut_builder.lib_dir);
+                cut_build_lib(unit);
+                break;
         }
-    }
-    else
-    {
-        printf("Usage: \n"
-                "    <cut> help             show this help\n"
-                "    <cut> build <name>     build the unit\n"
-                "    <cut> run <name>       build and run the unit\n"
-                "    <cut> clean            clean artifacts\n"
-                "    <cut> rebuild <cmd>    rebuild script executable\n");
-
-        return 1;
+        goto done;
     }
 
-    return 0;
+    ok = sv_equal(subcmd, "help");
+    printf("Usage:\n"
+            "    <cut> help             show this help\n"
+            "    <cut> build <name>     build the unit\n"
+            "    <cut> run   <name>     build and run the unit\n"
+            "    <cut> clean            clean artifacts\n"
+            "\n"
+            "Options:\n"
+            "    -r | --rebuild         force rebuilding the script\n"
+    );
+
+done:
+    da_free(&args);
+    return ok ? 0 : 1;
 }
 
 
@@ -1694,6 +1789,7 @@ int cut_build_run(int argc, char **argv)
 // Initialize a flag parser.
 void cut_fp_init(CutFlagParser *fp)
 {
+    fp->subcmd = SV("");
     da_init(&fp->commands);
     da_init(&fp->optional);
 }
@@ -1701,6 +1797,7 @@ void cut_fp_init(CutFlagParser *fp)
 // Reset a flag parser's configuration.
 void cut_fp_reset(CutFlagParser *fp)
 {
+    fp->subcmd = SV("");
     da_reset(&fp->commands);
     da_reset(&fp->optional);
 }
@@ -1713,9 +1810,24 @@ void cut_fp_free(CutFlagParser *fp)
 }
 
 // Add a command to the flag parser.
-void cut_fp_add_command(CutFlagParser *fp, StringView cmd)
+void cut_fp_add_command(CutFlagParser *fp, const char *cmd)
 {
-    da_append(&fp->commands, cmd);
+    da_append(&fp->commands, SV(cmd));
+}
+
+void _cut_fp_add_commands(CutFlagParser *fp, const char *first, ...)
+{
+    va_list args;
+    va_start(args, first);
+
+    const char *current = first;
+    while (current)
+    {
+        cut_fp_add_command(fp, current);
+        current = va_arg(args, const char *);
+    }
+
+    va_end(args);
 }
 
 // Add an optional flag to the flag parser.
@@ -1812,7 +1924,7 @@ static CutFPResult fp_error(CutFPStatus s, CutFlag f, StringView v)
     return r;
 }
 
-StringView cut_fp_get_command(CutFlagParser *fp, int argc, char **argv)
+static StringView cut_fp_get_command(CutFlagParser *fp, int argc, char **argv)
 {
     if (argc <= 1) return SV("");
 
@@ -1835,8 +1947,12 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out)
 
     int pos = 1;
 
-    if (cut_fp_get_command(fp, argc, argv).len > 0)
+    StringView subcmd = cut_fp_get_command(fp, argc, argv);
+    if (subcmd.len > 0)
+    {
+        fp->subcmd = subcmd;
         pos++;
+    }
 
     while (pos < argc)
     {

@@ -1,12 +1,18 @@
 #ifndef CUT_H
 #define CUT_H
 
+#ifdef CUT_UTILS_ONLY
+    #define CUT_NO_BUILD
+    #define CUT_NO_FLAGS
+#endif
+
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <assert.h>
 
 /************************************************
  * Dynamic Array
@@ -96,6 +102,24 @@
     da_appendn((da), (from)->data, (from)->len); \
 } while (0)
 
+#define da_insert(da, item, at) do { \
+    size_t _at = (at); \
+    assert(_at <= (da)->len); \
+    da_grow(da); \
+    memmove(&(da)->data[_at+1], &(da)->data[_at], \
+            ((da)->len - _at) * sizeof(*(da)->data)); \
+    (da)->data[_at] = (item); \
+    (da)->len++; \
+} while (0)
+
+#define da_remove(da, at) do { \
+    size_t _at = (at); \
+    assert(_at < (da)->len); \
+    memmove(&(da)->data[_at], &(da)->data[_at+1], \
+            ((da)->len - _at - 1) * sizeof(*(da)->data)); \
+    (da)->len--; \
+} while (0)
+
 /************************************************
  * Strings
  ************************************************/
@@ -168,6 +192,16 @@ void str_appendf(String *s, const char *fmt, ...);
 // Append a variadic formatted string to the string.
 void str_appendvf(String *s, const char *fmt, va_list args);
 
+#define str_insert_char(s, item, at) do { \
+    da_insert((s), (item), (at)); \
+    str_append_null(s); \
+} while (0)
+
+#define str_remove(s, at) do { \
+    da_remove((s), (at)); \
+    str_append_null(s); \
+} while (0)
+
 // Initializes a string.
 #define str_init(s) do { \
     da_init(s); \
@@ -199,9 +233,6 @@ void str_appendvf(String *s, const char *fmt, va_list args);
     str_reserve((s), (from)->len+1); \
     str_append((s), (from)); \
 } while (0)
-
-// Insert an element at index n.
-void str_insert(String *s, char v, size_t n);
 
 // Find the index of a character.
 size_t sv_find(StringView s, char v);
@@ -254,6 +285,8 @@ bool svlist_contains(SVList *sl, StringView v);
 /************************************************
  * Logging
  ************************************************/
+
+#ifndef CUT_NO_TESTING
 
 #define AFMT_RESET     "\e[0m"
 #define AFMT_BOLD      "\e[1m"
@@ -432,10 +465,13 @@ void cut_test_run_opt(TestRunOpt opt);
 } while (0)
 #endif // CUT_NO_DEV
 
+#endif // CUT_NO_TESTING
 
 /************************************************
  * Build
  ************************************************/
+
+#ifndef CUT_NO_BUILD
 
 // The kinds of a unit.
 typedef enum
@@ -521,10 +557,13 @@ void _cut_build_add(CutUnit *first, ...);
 // Run build.
 int cut_build_run(int argc, char **argv);
 
+#endif // CUT_NO_BUILD
 
 /************************************************
  * CLI Flag Parsing
  ************************************************/
+
+#ifndef CUT_NO_FLAGS
 
 typedef enum
 {
@@ -600,6 +639,7 @@ typedef struct
 
 CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 
+#endif // CUT_NO_FLAGS
 
 #endif // CUT_H
 
@@ -611,17 +651,22 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 // #define CUT_IMPL
 #ifdef CUT_IMPL
 
-#include <assert.h>
 #include <stddef.h>
 #include <time.h>
 #include <errno.h>
+#include <ctype.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #ifdef _WIN32
     #include <io.h>
-    #include <windows.h>
+    #include <ctype.h>
     #include <direct.h>
+
+    #ifndef CUT_NO_BUILD
+        #define WIN32_LEAN_AND_MEAN
+        #include <windows.h>
+    #endif
 
     #define isatty     _isatty
     #define fileno     _fileno
@@ -631,7 +676,7 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
 #else
     #include <unistd.h>
     #include <limits.h>
-    #include <ctype.h>
+
     #define makedir(x) mkdir(x, 0755)
 #endif // _WIN32
 
@@ -640,20 +685,24 @@ CutFPResult cut_fp_parse(CutFlagParser *fp, int argc, char **argv, SVList *out);
  * Globals
  ************************************************/
 
-// Global linked list of test cases.
-static CutTestCase *cut_test_registry_head = NULL;
+#ifndef CUT_NO_TESTING
+    // Global linked list of test cases.
+    static CutTestCase *cut_test_registry_head = NULL;
 
-// Count of registered tests.
-static size_t cut_test_registry_size = 0;
+    // Count of registered tests.
+    static size_t cut_test_registry_size = 0;
 
-// Length of the longest test name
-static size_t cut_test_name_max = 0;
+    // Length of the longest test name
+    static size_t cut_test_name_max = 0;
 
-// Global test context.
-static CutLogList cut_dev_logs = {0};
+    // Global test context.
+    static CutLogList cut_dev_logs = {0};
+#endif
 
-// Global builder.
-static CutBuilder cut_builder = {0};
+#ifndef CUT_NO_BUILD
+    // Global builder.
+    static CutBuilder cut_builder = {0};
+#endif
 
 
 /************************************************
@@ -746,18 +795,6 @@ void str_appendvf(String *s, const char *fmt, va_list args)
     char buffer[size+1];
     vsnprintf(buffer, (size_t)size+1, fmt, args);
     str_append_cstr(s, buffer);
-}
-
-// Insert an element at index n.
-void str_insert(String *s, char v, size_t n)
-{
-    assert(n <= s->len);
-    da_grow(s);
-    for (size_t i = s->len; i > n; i--)
-        da_at(s, i) = da_at(s, i-1);
-
-    da_at(s, n) = v;
-    s->len++;
 }
 
 // Find the index of a character.
@@ -993,12 +1030,14 @@ static void command_format(SVList *sl, String *sb, StringView prefix)
  * Platform Utils
  ************************************************/
 
+#ifndef CUT_NO_BUILD
+
+#define PATH_SEP_C '/'
+
 #ifdef _WIN32
     #define PATH_SEP "\\"
-    #define PATH_SEP_C '\\'
 #else
     #define PATH_SEP "/"
-    #define PATH_SEP_C '/'
 #endif
 
 // Get the mtime of a file, return -1 if error.
@@ -1105,10 +1144,14 @@ static void remove_path(StringView path)
     str_free(&cmd);
 }
 
+#endif // CUT_NO_BUILD
+
 
 /************************************************
  * Logging
  ************************************************/
+
+#ifndef CUT_NO_TESTING
 
 static void log_free(CutLog *log)
 {
@@ -1339,10 +1382,14 @@ void cut_test_run_opt(TestRunOpt opt)
             test_ran, test_ran-test_failed, test_failed);
 }
 
+#endif // CUT_NO_TESTING
+
 
 /************************************************
  * Build
  ************************************************/
+
+#ifndef CUT_NO_BUILD
 
 // Initializes a unit.
 void cut_unit_init(CutUnit *unit, const char *name, CutUnitKind kind)
@@ -1781,10 +1828,14 @@ done:
     return ok ? 0 : 1;
 }
 
+#endif // CUT_NO_BUILD
+
 
 /************************************************
  * CLI Flag Parsing
  ************************************************/
+
+#if !defined(CUT_NO_BUILD) || !defined(CUT_NO_FLAGS)
 
 // Initialize a flag parser.
 void cut_fp_init(CutFlagParser *fp)
@@ -2092,5 +2143,7 @@ positional:
 
     return fp_ok();
 }
+
+#endif // !CUT_NO_BUILD || !CUT_NO_FLAGS
 
 #endif // CUT_IMPL
